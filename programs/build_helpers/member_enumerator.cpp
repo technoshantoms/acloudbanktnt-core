@@ -24,7 +24,6 @@
 #include <graphene/chain/withdraw_permission_object.hpp>
 #include <graphene/chain/proposal_object.hpp>
 #include <graphene/chain/witness_object.hpp>
-#include <graphene/chain/market_evaluator.hpp>
 #include <graphene/chain/account_object.hpp>
 #include <graphene/chain/htlc_object.hpp>
 #include <graphene/chain/balance_object.hpp>
@@ -103,7 +102,7 @@ void class_processor::process_class( const static_variant< T... >* dummy )
    static_variant<T...> dummy2;
    static_variant_visitor vtor( this );
 
-   for( int w=0; w<dummy2.count(); w++ )
+   for( size_t w=0; w<dummy2.count(); w++ )
    {
       dummy2.set_which(w);
       dummy2.visit( vtor );

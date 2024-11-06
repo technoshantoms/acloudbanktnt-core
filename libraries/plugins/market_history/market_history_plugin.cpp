@@ -43,9 +43,8 @@ namespace detail
 class market_history_plugin_impl
 {
    public:
-      market_history_plugin_impl(market_history_plugin& _plugin)
+      explicit market_history_plugin_impl(market_history_plugin& _plugin)
       :_self( _plugin ) {}
-      virtual ~market_history_plugin_impl();
 
       /** this method is called as a callback after a block is applied
        * and will process/index all operations that were applied in the block.
@@ -80,7 +79,7 @@ struct operation_process_fill_order
    template<typename T>
    void operator()( const T& )const{}
 
-   void operator()( const fill_order_operation& o )const 
+   void operator()( const fill_order_operation& o )const
    {
       //ilog( "processing ${o}", ("o",o) );
       auto& db         = _plugin.database();
@@ -92,7 +91,7 @@ struct operation_process_fill_order
       history_key hkey;
       hkey.base = o.pays.asset_id;
       hkey.quote = o.receives.asset_id;
-      if( hkey.base > hkey.quote ) 
+      if( hkey.base > hkey.quote )
          std::swap( hkey.base, hkey.quote );
       hkey.sequence = std::numeric_limits<int64_t>::min();
 
@@ -290,21 +289,21 @@ struct operation_process_fill_order
    }
 };
 
-market_history_plugin_impl::~market_history_plugin_impl()
-{}
-
 void market_history_plugin_impl::update_market_histories( const signed_block& b )
 {
    graphene::chain::database& db = database();
+
    const market_ticker_meta_object* _meta = nullptr;
    const auto& meta_idx = db.get_index_type<simple_index<market_ticker_meta_object>>();
    if( meta_idx.size() > 0 )
       _meta = &( *meta_idx.begin() );
+
    const vector<optional< operation_history_object > >& hist = db.get_applied_operations();
    for( const optional< operation_history_object >& o_op : hist )
    {
       if( o_op.valid() )
       {
+         // process market history
          try
          {
             o_op->op.visit( operation_process_fill_order( _self, b.timestamp, _meta ) );
@@ -385,19 +384,14 @@ void market_history_plugin_impl::update_market_histories( const signed_block& b 
 
 } // end namespace detail
 
-
-
-
-
-
-market_history_plugin::market_history_plugin() :
-   my( new detail::market_history_plugin_impl(*this) )
+market_history_plugin::market_history_plugin(graphene::app::application& app) :
+   plugin(app),
+   my( std::make_unique<detail::market_history_plugin_impl>(*this) )
 {
+   // Nothing else to do
 }
 
-market_history_plugin::~market_history_plugin()
-{
-}
+market_history_plugin::~market_history_plugin() = default;
 
 std::string market_history_plugin::plugin_name()const
 {
@@ -411,13 +405,20 @@ void market_history_plugin::plugin_set_program_options(
 {
    cli.add_options()
          ("bucket-size", boost::program_options::value<string>()->default_value("[60,300,900,1800,3600,14400,86400]"),
-           "Track market history by grouping orders into buckets of equal size measured in seconds specified as a JSON array of numbers")
+           "Track market history by grouping orders into buckets of equal size measured "
+           "in seconds specified as a JSON array of numbers")
          ("history-per-size", boost::program_options::value<uint32_t>()->default_value(1000),
-           "How far back in time to track history for each bucket size, measured in the number of buckets (default: 1000)")
+           "How far back in time to track history for each bucket size, "
+           "measured in the number of buckets (default: 1000)")
          ("max-order-his-records-per-market", boost::program_options::value<uint32_t>()->default_value(1000),
-           "Will only store this amount of matched orders for each market in order history for querying, or those meet the other option, which has more data (default: 1000)")
+           "Will only store this amount of matched orders for each market in order history for querying, "
+           "or those meet the other option, which has more data (default: 1000). "
+           "This parameter is reused for liquidity pools as maximum operations per pool in history.")
          ("max-order-his-seconds-per-market", boost::program_options::value<uint32_t>()->default_value(259200),
-           "Will only store matched orders in last X seconds for each market in order history for querying, or those meet the other option, which has more data (default: 259200 (3 days))")
+           "Will only store matched orders in last X seconds for each market in order history for querying, "
+           "or those meet the other option, which has more data (default: 259200 (3 days)). "
+           "This parameter is reused for liquidity pools as operations in last X seconds per pool in history. "
+           "Note: this parameter need to be greater than 24 hours to be able to serve market ticker data correctly.")
          ;
    cfg.add(cli);
 }
@@ -425,22 +426,23 @@ void market_history_plugin::plugin_set_program_options(
 void market_history_plugin::plugin_initialize(const boost::program_options::variables_map& options)
 { try {
    database().applied_block.connect( [this]( const signed_block& b){ my->update_market_histories(b); } );
+
    database().add_index< primary_index< bucket_index  > >();
    database().add_index< primary_index< history_index  > >();
-   database().add_index< primary_index< market_ticker_index  > >();
+   database().add_index< primary_index< market_ticker_index, 8 > >(); // 256 markets per chunk
    database().add_index< primary_index< simple_index< market_ticker_meta_object > > >();
 
-   if( options.count( "bucket-size" ) )
+   if( options.count( "bucket-size" ) > 0 )
    {
       const std::string& buckets = options["bucket-size"].as<string>();
       my->_tracked_buckets = fc::json::from_string(buckets).as<flat_set<uint32_t>>(2);
       my->_tracked_buckets.erase( 0 );
    }
-   if( options.count( "history-per-size" ) )
+   if( options.count( "history-per-size" ) > 0 )
       my->_maximum_history_per_bucket_size = options["history-per-size"].as<uint32_t>();
-   if( options.count( "max-order-his-records-per-market" ) )
+   if( options.count( "max-order-his-records-per-market" ) > 0 )
       my->_max_order_his_records_per_market = options["max-order-his-records-per-market"].as<uint32_t>();
-   if( options.count( "max-order-his-seconds-per-market" ) )
+   if( options.count( "max-order-his-seconds-per-market" ) > 0 )
       my->_max_order_his_seconds_per_market = options["max-order-his-seconds-per-market"].as<uint32_t>();
 } FC_CAPTURE_AND_RETHROW() }
 

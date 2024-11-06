@@ -1,6 +1,7 @@
 #pragma once
 /*
- * Copyright (c) 2019 Contributors
+ * Copyright (c) 2015 Cryptonomex, Inc., and contributors.
+ * Copyright (c) 2020-2023 Revolution Populi Limited, and contributors.
  *
  * The MIT License
  *
@@ -51,6 +52,9 @@ struct hardfork_visitor {
    using TNT_ops = TL::list<tank_create_operation, tank_update_operation, tank_delete_operation,
                             tank_query_operation, tap_open_operation, tap_connect_operation,
                             account_fund_connection_operation, connection_fund_account_operation>;
+   using ticket_ops  = TL::list<ticket_create_operation, ticket_update_operation>;
+   using ico_ops     = TL::list<ico_balance_claim_operation>;
+
    fc::time_point_sec now;
 
    hardfork_visitor(fc::time_point_sec now) : now(now) {}
@@ -59,29 +63,35 @@ struct hardfork_visitor {
    /// @{
    template<typename Op>
    std::enable_if_t<operation::tag<Op>::value < operation::tag<first_unforked_op>::value, bool>
-   visit() const { return true; }
+   visit() { return true; }
    template<typename Op>
    std::enable_if_t<TL::contains<BSIP_40_ops, Op>(), bool>
-   visit() const { return HARDFORK_BSIP_40_PASSED(now); }
+   visit() { return HARDFORK_BSIP_40_PASSED(now); }
    template<typename Op>
    std::enable_if_t<TL::contains<TNT_ops, Op>(), bool>
-   visit() const { return HARDFORK_BSIP_72_PASSED(now); }
+   visit() { return HARDFORK_BSIP_72_PASSED(now); }
+   template<typename Op>
+   std::enable_if_t<TL::contains<ticket_ops, Op>(), bool>
+   visit() { return true; }
+   template<typename Op>
+   std::enable_if_t<TL::contains<ico_ops, Op>(), bool>
+   visit() { return true; }
    /// @}
 
    /// typelist::runtime::dispatch adaptor
    template<class W, class Op=typename W::type>
    std::enable_if_t<TL::contains<operation::list, Op>(), bool>
-   operator()(W) const { return visit<Op>(); }
+   operator()(W) { return visit<Op>(); }
    /// static_variant::visit adaptor
    template<class Op>
    std::enable_if_t<TL::contains<operation::list, Op>(), bool>
-   operator()(const Op&) const { return visit<Op>(); }
+   operator()(const Op&) { return visit<Op>(); }
    /// Tag adaptor
-   bool visit(operation::tag_type tag) const {
+   bool visit(operation::tag_type tag) {
       return TL::runtime::dispatch(operation::list(), (size_t)tag, *this);
    }
    /// operation adaptor
-   bool visit(const operation& op) const {
+   bool visit(const operation& op) {
       return visit(op.which());
    }
 };

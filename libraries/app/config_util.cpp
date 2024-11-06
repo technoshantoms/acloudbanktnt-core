@@ -1,25 +1,6 @@
 /*
- * Copyright (c) 2018 Lubos Ilcik, and contributors.
+ * AcloudBank
  *
- * The MIT License
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
  */
 
 #include <graphene/app/config_util.hpp>
@@ -35,7 +16,6 @@
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/ini_parser.hpp>
 #include <boost/algorithm/string/predicate.hpp>
-#include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string.hpp>
 
@@ -213,8 +193,8 @@ static void load_config_file(const fc::path& config_ini_path, const bpo::options
                              bpo::variables_map& options )
 {
    graphene::app::detail::deduplicator dedup;
-   bpo::options_description unique_options("BitShares Witness Node");
-   for( const boost::shared_ptr<bpo::option_description> opt : cfg_options.options() )
+   bpo::options_description unique_options("AcloudBank Witness Node");
+   for( const boost::shared_ptr<bpo::option_description>& opt : cfg_options.options() )
    {
       const boost::shared_ptr<bpo::option_description> od = dedup.next(opt);
       if( !od ) continue;
@@ -263,7 +243,7 @@ static void create_new_config_file(const fc::path& config_ini_path, const fc::pa
    graphene::app::detail::deduplicator dedup(modify_option_defaults);
    std::ofstream out_cfg(config_ini_path.preferred_string());
    std::string plugin_header_surrounding( 78, '=' );
-   for( const boost::shared_ptr<bpo::option_description> opt : cfg_options.options() )
+   for( const boost::shared_ptr<bpo::option_description>& opt : cfg_options.options() )
    {
       const boost::shared_ptr<bpo::option_description> od = dedup.next(opt);
       if( !od ) continue;

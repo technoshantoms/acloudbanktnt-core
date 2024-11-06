@@ -1,25 +1,6 @@
 /*
- * Copyright (c) 2017 Cryptonomex, Inc., and contributors.
+ * AcloudBank
  *
- * The MIT License
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
  */
 #pragma once
 
@@ -41,10 +22,10 @@ using namespace graphene::protocol;
 using namespace graphene::chain;
 using namespace graphene::app;
 
-static const string ENC_HEADER( "-----BEGIN BITSHARES SIGNED MESSAGE-----\n" );
+static const string ENC_HEADER( "-----BEGIN ACLOUDBANK SIGNED MESSAGE-----\n" );
 static const string ENC_META(   "-----BEGIN META-----\n" );
 static const string ENC_SIG(    "-----BEGIN SIGNATURE-----\n" );
-static const string ENC_FOOTER( "-----END BITSHARES SIGNED MESSAGE-----" );
+static const string ENC_FOOTER( "-----END ACLOUDBANK SIGNED MESSAGE-----" );
 
 template<class T>
 fc::optional<T> maybe_id( const string& name_or_id )
@@ -169,7 +150,7 @@ public:
 
    fc::optional<htlc_object> get_htlc(string htlc_id) const;
 
-   asset_id_type get_asset_id(string asset_symbol_or_id) const;
+   asset_id_type get_asset_id(const string& asset_symbol_or_id) const;
 
    string get_wallet_filename() const;
 
@@ -184,6 +165,9 @@ public:
    bool import_key(string account_name_or_id, string wif_key);
 
    vector< signed_transaction > import_balance( string name_or_id, const vector<string>& wif_keys, bool broadcast );
+
+   vector< signed_transaction > ico_import_balance( string account_name_or_id, string eth_pub_key, string eth_sign,
+                                                   bool broadcast );
 
    bool load_wallet_file(string wallet_filename = "");
 
@@ -218,15 +202,12 @@ public:
          uint32_t operation_index, const operation& new_op);
    asset set_fees_on_builder_transaction(transaction_handle_type handle, string fee_asset = GRAPHENE_SYMBOL);
    transaction preview_builder_transaction(transaction_handle_type handle);
-   signed_transaction sign_builder_transaction(transaction_handle_type transaction_handle, bool broadcast = true);
+   signed_transaction sign_builder_transaction(transaction_handle_type transaction_handle,
+         const vector<public_key_type>& signing_keys = vector<public_key_type>(), bool broadcast = true);
 
    pair<transaction_id_type,signed_transaction> broadcast_transaction(signed_transaction tx);
 
    signed_transaction propose_builder_transaction( transaction_handle_type handle,
-         time_point_sec expiration = time_point::now() + fc::minutes(1),
-         uint32_t review_period_seconds = 0, bool broadcast = true);
-
-   signed_transaction propose_builder_transaction2( transaction_handle_type handle,
          string account_name_or_id, time_point_sec expiration = time_point::now() + fc::minutes(1),
          uint32_t review_period_seconds = 0, bool broadcast = true);
 
@@ -272,9 +253,6 @@ public:
    signed_transaction settle_asset(string account_to_settle, string amount_to_settle, string symbol,
          bool broadcast );
 
-   signed_transaction bid_collateral(string bidder_name, string debt_amount, string debt_symbol,
-         string additional_collateral, bool broadcast );
-
    signed_transaction whitelist_account(string authorizing_account, string account_to_list,
          account_whitelist_operation::account_listing new_listing_status, bool broadcast );
 
@@ -297,9 +275,10 @@ public:
 
    signed_transaction htlc_create( string source, string destination, string amount, string asset_symbol,
          string hash_algorithm, const std::string& preimage_hash, uint32_t preimage_size,
-         const uint32_t claim_period_seconds, bool broadcast = false );
+         const uint32_t claim_period_seconds, const std::string& memo, bool broadcast = false );
 
-   signed_transaction htlc_redeem( string htlc_id, string issuer, const std::vector<char>& preimage, bool broadcast );
+   signed_transaction htlc_redeem( string htlc_id, string issuer, const std::vector<char>& preimage, 
+         bool broadcast );
 
    signed_transaction htlc_extend ( string htlc_id, string issuer, const uint32_t seconds_to_add, bool broadcast);
 
@@ -325,6 +304,9 @@ public:
          bool broadcast );
 
    signed_transaction sign_transaction(signed_transaction tx, bool broadcast = false);
+   signed_transaction sign_transaction2(signed_transaction tx,
+                                        const vector<public_key_type>& signing_keys = vector<public_key_type>(),
+                                        bool broadcast = false);
 
    flat_set<public_key_type> get_transaction_signers(const signed_transaction &tx) const;
 
@@ -347,13 +329,6 @@ public:
          string min_to_receive, string symbol_to_receive, uint32_t timeout_sec = 0,
          bool fill_or_kill = false, bool broadcast = false);
 
-   signed_transaction borrow_asset(string seller_name, string amount_to_borrow, string asset_symbol,
-         string amount_of_collateral, bool broadcast = false);
-
-   signed_transaction borrow_asset_ext( string seller_name, string amount_to_borrow, string asset_symbol,
-         string amount_of_collateral, call_order_update_operation::extensions_type extensions,
-         bool broadcast = false);
-
    signed_transaction cancel_order(limit_order_id_type order_id, bool broadcast = false);
 
    signed_transaction transfer(string from, string to, string amount,
@@ -364,6 +339,9 @@ public:
 
    std::map<string,std::function<string(fc::variant,const fc::variants&)>> get_result_formatters() const;
 
+   signed_transaction propose_parameter_extension_change( const string& proposing_account, fc::time_point_sec expiration_time,
+         const variant_object& changed_extensions, bool broadcast = false);
+
    signed_transaction propose_parameter_change( const string& proposing_account, fc::time_point_sec expiration_time,
          const variant_object& changed_values, bool broadcast = false);
 
@@ -372,6 +350,61 @@ public:
 
    signed_transaction approve_proposal( const string& fee_paying_account, const string& proposal_id,
          const approval_delta& delta, bool broadcast = false);
+
+   signed_transaction create_personal_data( const string& subject_account,
+         const string& operator_account,
+         const string& url,
+         const string& hash,
+         const string& storage_data,
+         bool broadcast = false );
+
+   signed_transaction remove_personal_data( const string subject_account, 
+         const string operator_account,
+         const string hash,
+         bool broadcast = false );
+
+   std::vector<personal_data_object> get_personal_data( const string subject_account, const string operator_account) const;
+
+   personal_data_object get_last_personal_data( const string subject_account, const string operator_account) const;
+
+   signed_transaction create_content_card( const string subject_account,
+         const string hash, const string url,
+         const string type, const string description,
+         const string content_key, const string& storage_data,
+         bool broadcast = false );
+
+   signed_transaction update_content_card( const string subject_account,
+         const string hash, const string url,
+         const string type, const string description,
+         const string content_key, const string& storage_data,
+         bool broadcast = false );
+
+   signed_transaction remove_content_card( const string subject_account,
+         uint64_t content_id,
+         bool broadcast = false );
+
+   signed_transaction create_permission( const string subject_account,
+         const string operator_account,
+         const string permission_type,
+         const string object_id,
+         const string content_key,
+         bool broadcast = false );
+
+   signed_transaction remove_permission( const string subject_account,
+         uint64_t permission_id,
+         bool broadcast = false );
+
+   content_card_object get_content_card_by_id( uint64_t content_id ) const;
+
+   std::vector<content_card_object> get_content_cards( const string subject_account,
+         uint64_t content_id,
+         unsigned limit = 100 ) const;
+
+   permission_object get_permission_by_id( uint64_t permission_id ) const;
+
+   std::vector<permission_object> get_permissions( const string& operator_account,
+         uint64_t permission_id,
+         unsigned limit = 100 ) const;
 
    void dbg_make_uia(string creator, string symbol);
 

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2018 Abit More, and contributors.
+ * Copyright (c) 2020-2023 Revolution Populi Limited, and contributors.
  *
  * The MIT License
  *
@@ -80,8 +81,6 @@ BOOST_AUTO_TEST_CASE( broadcast_transaction_too_large ) {
       fund( cid_id(db) );
 
       auto nb_api = std::make_shared< graphene::app::network_broadcast_api >( app );
-
-      generate_blocks( HARDFORK_CORE_1573_TIME + 10 );
 
       set_expiration( db, trx );
       transfer_operation trans;

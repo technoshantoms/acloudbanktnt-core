@@ -1,30 +1,14 @@
 /*
- * Copyright (c) 2015 Cryptonomex, Inc., and contributors.
+ * AcloudBank
  *
- * The MIT License
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
  */
 #include <graphene/witness/witness.hpp>
 
+#include <graphene/chain/hardfork.hpp>
+
 #include <graphene/chain/database.hpp>
 #include <graphene/chain/witness_object.hpp>
+#include <graphene/chain/commit_reveal_object.hpp>
 
 #include <graphene/utilities/key_conversion.hpp>
 
@@ -34,7 +18,9 @@
 #include <boost/filesystem/path.hpp>
 
 #include <iostream>
+#include <chrono>
 
+using namespace graphene::chain;
 using namespace graphene::witness_plugin;
 using std::string;
 using std::vector;
@@ -44,13 +30,13 @@ namespace bpo = boost::program_options;
 void new_chain_banner( const graphene::chain::database& db )
 {
    ilog("\n"
-      "********************************\n"
-      "*                              *\n"
-      "*   ------- NEW CHAIN ------   *\n"
-      "*   - Welcome to BitShares! -  *\n"
-      "*   ------------------------   *\n"
-      "*                              *\n"
-      "********************************\n"
+      "*******************************\n"
+      "*                             *\n"
+      "*  ------- NEW CHAIN -------  *\n"
+      "* - Welcome to AcloudBank! -  *\n"
+      "*  -------------------------  *\n"
+      "*                             *\n"
+      "*******************************\n"
       "\n");
    if( db.get_slot_at_time( fc::time_point::now() ) > 200 )
    {
@@ -81,6 +67,8 @@ void witness_plugin::plugin_set_program_options(
           "Path to a file containing tuples of [PublicKey, WIF private key]."
           " The file has to contain exactly one tuple (i.e. private - public key pair) per line."
           " This option may be specified multiple times, thus multiple files can be provided.")
+         ("user-provided-seed", bpo::value<uint64_t>(),
+               "A random number that will be used by a pseudo-random number generator as a source of entropy")
          ;
    config_file_options.add(command_line_options);
 }
@@ -122,7 +110,7 @@ void witness_plugin::plugin_initialize(const boost::program_options::variables_m
    _options = &options;
    LOAD_VALUE_SET(options, "witness-id", _witnesses, chain::witness_id_type)
 
-   if( options.count("private-key") )
+   if( options.count("private-key") > 0 )
    {
       const std::vector<std::string> key_id_to_wif_pair_strings = options["private-key"].as<std::vector<std::string>>();
       for (const std::string& key_id_to_wif_pair_string : key_id_to_wif_pair_strings)
@@ -130,7 +118,7 @@ void witness_plugin::plugin_initialize(const boost::program_options::variables_m
          add_private_key(key_id_to_wif_pair_string);
       }
    }
-   if (options.count("private-key-file"))
+   if (options.count("private-key-file") > 0)
    {
       const std::vector<boost::filesystem::path> key_id_to_wif_pair_files =
             options["private-key-file"].as<std::vector<boost::filesystem::path>>();
@@ -154,7 +142,7 @@ void witness_plugin::plugin_initialize(const boost::program_options::variables_m
          }
       }
    }
-   if(options.count("required-participation"))
+   if(options.count("required-participation") > 0)
    {
        auto required_participation = options["required-participation"].as<uint32_t>();
        FC_ASSERT(required_participation <= 100);
@@ -164,6 +152,19 @@ void witness_plugin::plugin_initialize(const boost::program_options::variables_m
        else if(required_participation > 90)
            wlog("witness plugin: Warning - High required participation of ${rp}% found", ("rp", required_participation));
    }
+   if(options.count("user-provided-seed") > 0)
+   {
+      uint64_t user_provided_seed = options["user-provided-seed"].as<uint64_t>();
+      uint64_t seed = static_cast<uint64_t>(
+         std::chrono::high_resolution_clock::now().time_since_epoch().count()) ^ user_provided_seed;
+      gen.seed(seed);
+   }
+   else
+   {
+      std::random_device rd;
+      gen.seed(rd());
+   }
+
    ilog("witness plugin:  plugin_initialize() end");
 } FC_LOG_AND_RETHROW() }
 
@@ -192,12 +193,34 @@ void witness_plugin::plugin_startup()
    {
       ilog("No witness configured.");
    }
+
+   // AcloudBank
+   check_resources();
+
+   _network_broadcast_api = std::make_shared< app::network_broadcast_api >( std::ref( app() ) );
+
+   database().applied_block.connect([this](const signed_block &b) {
+      commit_reveal_operations();
+   });
+
    ilog("witness plugin:  plugin_startup() end");
 } FC_CAPTURE_AND_RETHROW() }
 
-void witness_plugin::plugin_shutdown()
-{
-   stop_block_production();
+void witness_plugin::check_resources() {
+   // Every maintenance period check for the witnesses update:
+   // old witnesses may lose votes, while new ones can collect them.
+   auto& db = database();
+   const auto& wit_idx = db.get_index_type<witness_index>();
+   const auto& wit_op_idx = wit_idx.indices().get<by_id>();
+   std::vector< account_id_type > masters;
+   for (const auto& wit_id: _witnesses){
+      const auto& wit_itr = wit_op_idx.lower_bound(wit_id);
+      if (wit_itr != wit_op_idx.end()) {
+         masters.push_back(wit_itr->witness_account);
+         _witness_account[wit_itr->witness_account] = wit_id;
+      }
+   }
+   _witness_accounts.swap(masters);
 }
 
 void witness_plugin::stop_block_production()
@@ -217,7 +240,7 @@ void witness_plugin::stop_block_production()
 void witness_plugin::refresh_witness_key_cache()
 {
    const auto& db = database();
-   for( const chain::witness_id_type wit_id : _witnesses )
+   for( const chain::witness_id_type& wit_id : _witnesses )
    {
       const chain::witness_object* wit_obj = db.find( wit_id );
       if( wit_obj )
@@ -242,6 +265,276 @@ void witness_plugin::schedule_production_loop()
 
    _block_production_task = fc::schedule([this]{block_production_loop();},
                                          next_wakeup, "Witness Block Production");
+}
+
+void witness_plugin::commit_reveal_operations() {
+   if (_witness_accounts.empty() || !_production_enabled )
+      return;
+
+   auto& db = database();
+   const auto& gpo = db.get_global_properties();
+   const auto& dgpo = db.get_dynamic_global_properties();
+
+   // calculate the block number in the current maintenance interval 
+   uint32_t last_maintenance_time = dgpo.next_maintenance_time.sec_since_epoch()
+                                          - gpo.parameters.maintenance_interval;
+   uint32_t maintenance_block_id  = (db.head_block_time().sec_since_epoch() - last_maintenance_time)
+                                          / gpo.parameters.block_interval;
+   //ilog("A block numer since the maintenance interval interval beginning: ${blc}", ("blc", maintenance_block_id));
+
+   if (maintenance_block_id < static_cast<int32_t>(gpo.parameters.maintenance_skip_slots)) {
+      // ---------------------//
+      // Maintenance interval //
+      //----------------------//
+      schedule_commit_reveal();
+      return;
+   }
+
+   uint64_t total_blocks = gpo.parameters.maintenance_interval / gpo.parameters.block_interval;
+   if (maintenance_block_id < total_blocks / 2) {
+      // --------------- //
+      // Commit interval //
+      // --------------- //
+
+      // Even if the required block was skipped, the operation will be executed.
+      for (auto& op: _commit_schedule) {
+         if (get<0>(op) > maintenance_block_id) return; // block
+         if (get<2>(op)) {                   // requires processing
+            broadcast_commit(get<1>(op));    // witness
+            get<2>(op) = false;
+         }
+      }
+      return;
+   }
+
+   // --------------- //
+   // Reveal interval //
+   // --------------- //
+
+   // Even if the required block was skipped, the operation will be executed.
+   for (auto &op : _reveal_schedule) {
+      if (get<0>(op) > maintenance_block_id - total_blocks / 2) return; // block
+      if (get<2>(op)) {                   // requires processing
+         broadcast_reveal(get<1>(op));    // witness
+         get<2>(op) = false;
+      }
+   }
+
+}
+
+void witness_plugin::schedule_commit_reveal() {
+   check_resources();
+   if (_witness_accounts.empty() || !_production_enabled )
+      return;
+
+   auto& db = database();
+   const auto& gpo = db.get_global_properties();
+
+   // numer of blocks between 2 maintenances
+   int32_t blocks = static_cast<int32_t>(gpo.parameters.maintenance_interval / gpo.parameters.block_interval);
+
+   // Use uniform distribution for the commit operations.
+   // For:
+   // {
+   //    "block_interval": 5,
+   //    "maintenance_interval": 300,
+   //    "maintenance_skip_slots": 3,
+   // }
+   // commit interval shoud be from the 3-th to the 29-th blocks
+   int32_t skip_blocks = static_cast<int32_t>(gpo.parameters.maintenance_skip_slots);
+   std::uniform_int_distribution<int32_t> unidist {skip_blocks, blocks/2 - 1};
+
+   // Use binomial distribution for the reveal operations.
+   // For:
+   // {
+   //    "block_interval": 5,
+   //    "maintenance_interval": 300,
+   //    "maintenance_skip_slots": 3,
+   // }
+   // reveal interval shoud be from the 30-th to the 59-th blocks
+   std::binomial_distribution<> bindist{blocks/2 - 1, 0.8};
+
+   _commit_schedule.clear();
+   _reveal_schedule.clear();
+   for (const auto& acc_id: _witness_accounts){
+      _commit_schedule.emplace_back(unidist(gen), acc_id, true);
+      _reveal_schedule.emplace_back(bindist(gen), acc_id, true);
+   }
+   sort(_commit_schedule.begin(), _commit_schedule.end());
+   sort(_reveal_schedule.begin(), _reveal_schedule.end());
+
+   /*
+   // DEBUG
+   ilog("Scheduled commits:");
+   for (const auto& it: _commit_schedule)
+      ilog("    ${blc} -> ${nme}(${acc})", ("blc", get<0>(it))("nme", get<1>(it)(db).name)("acc", get<1>(it)));
+   ilog("Scheduled reveals:");
+   for (const auto& it: _reveal_schedule)
+      ilog("    ${blc} -> ${nme}(${acc})", ("blc", get<0>(it) + blocks/2)("nme", get<1>(it)(db).name)("acc", get<1>(it)));
+   */
+}
+
+void witness_plugin::broadcast_commit(const chain::account_id_type& acc_id) {
+   auto& db = database();
+   const auto& dgpo = db.get_dynamic_global_properties();
+   const auto& gpo = db.get_global_properties();
+   const auto& chain_props = db.get_chain_properties();
+
+   // Prepare the block transaction
+   protocol::signed_transaction tx;
+
+   // Generate the bet,
+   // 0 is not possible secret value
+   std::uniform_int_distribution<uint64_t> dis(1);
+   _reveal_value[acc_id] = dis(gen);
+
+
+   // Search for the commit operation
+   const auto &cr_idx = db.get_index_type<commit_reveal_index>();
+   const auto &by_cr_acc = cr_idx.indices().get<by_account>();
+   auto cr_itr = by_cr_acc.lower_bound(acc_id);
+
+   uint32_t maintenance_time = dgpo.next_maintenance_time.sec_since_epoch();
+   uint32_t prev_maintenance_time = maintenance_time - gpo.parameters.maintenance_interval;
+   if (cr_itr != by_cr_acc.end() && cr_itr->account == acc_id
+      && prev_maintenance_time <= cr_itr->maintenance_time
+      && cr_itr->maintenance_time < maintenance_time)
+   {
+      ilog("[${b}: ${nme}(${acc})] Commit operation for the current maintenance period has already been made, value: ${v}",
+            ("b", db.head_block_num() + 1)("nme", acc_id(db).name)("acc", acc_id(db).get_id())("v", _reveal_value[acc_id]));
+      return;
+   }
+
+   if (!_witness_key_cache[_witness_account[acc_id]].valid()) {
+      ilog("[${b}: ${nme}(${acc})] Can't find a witness key for the commit operation, value: ${v}",
+            ("b", db.head_block_num() + 1)("nme", acc_id(db).name)("acc", acc_id(db).get_id())("v", _reveal_value[acc_id]));
+      return;
+   }
+
+   // Create the commit operation
+   commit_create_operation commit_op;
+   commit_op.account = acc_id;
+   commit_op.maintenance_time = fc::time_point::now().sec_since_epoch();
+   commit_op.witness_key = *_witness_key_cache[_witness_account[acc_id]];
+   commit_op.hash = fc::sha512::hash(
+      std::to_string(_reveal_value[acc_id]) +
+      fc::sha256::hash(
+         std::to_string(_reveal_value[acc_id]) +
+         fc::sha512::hash(
+            std::to_string(db.get_maintenance_seed()) +
+            commit_op.witness_key.operator std::string() +
+            fc::sha512::hash(
+               std::to_string(commit_op.maintenance_time)
+            ).str()
+         ).str()
+      ).str()
+   );
+   _reveal_hash[acc_id] = commit_op.hash;
+   tx.operations.push_back(commit_op);
+   ilog("[${b}: ${nme}(${acc})] Commit operation was sent, value: ${v}, hash: ${h} | ${wk}",
+         ("b", db.head_block_num() + 1)("nme", acc_id(db).name)("acc", acc_id(db).get_id())("v", _reveal_value[acc_id])("h", commit_op.hash)("wk", commit_op.witness_key));
+
+   // Broadcast the block transaction
+   if (tx.operations.size()){
+      tx.validate();
+      tx.set_reference_block(dgpo.head_block_id);
+      tx.set_expiration(dgpo.time + fc::seconds(30));
+      tx.clear_signatures();
+
+      const auto &pkey = get_witness_private_key(*_witness_key_cache[_witness_account[acc_id]]);
+
+      if (pkey.valid()) {
+         tx.sign(*pkey, chain_props.chain_id);
+         try {
+            _network_broadcast_api->broadcast_transaction(tx);
+         }
+         catch (const fc::exception &e) {
+            elog("Caught exception while broadcasting tx ${id}:  ${e}",
+                  ("id", tx.id().str())("e", e.to_detail_string()));
+            throw;
+         }
+      }
+   }
+}
+
+void witness_plugin::broadcast_reveal(const chain::account_id_type& acc_id) {
+   auto& db = database();
+   const auto& dgpo = db.get_dynamic_global_properties();
+   const auto& chain_props = db.get_chain_properties();
+
+   // Prepare the block transaction
+   protocol::signed_transaction tx;
+
+   // Search for the corresponding commit operation
+   const auto &cr_idx = db.get_index_type<commit_reveal_index>();
+   const auto &by_cr_acc = cr_idx.indices().get<by_account>();
+   auto cr_itr = by_cr_acc.lower_bound(acc_id);
+
+   if (cr_itr == by_cr_acc.end() || cr_itr->account != acc_id || _reveal_value[acc_id] == 0)
+   {
+      ilog("[${b}: ${nme}(${acc})] Reveal operation can't find the corresponding commit operation, value: ${v}",
+            ("b", db.head_block_num() + 1)("nme", acc_id(db).name)("acc", acc_id(db).get_id())
+            ("v", _reveal_value[acc_id]));
+      return;
+   }
+
+   if (cr_itr->hash != _reveal_hash[acc_id] || cr_itr->value != 0)
+   {
+      ilog("[${b}: ${nme}(${acc})] Double reveal operations is prohibited, value: ${v}, hash: ${h}",
+            ("b", db.head_block_num() + 1)("nme", acc_id(db).name)("acc", acc_id(db).get_id())
+            ("v", _reveal_value[acc_id])("h", _reveal_hash[acc_id]));
+      return;
+   }
+
+   if (!_witness_key_cache[_witness_account[acc_id]].valid()) {
+      ilog("[${b}: ${nme}(${acc})] Can't find a witness key for the commit operation, value: ${v}",
+            ("b", db.head_block_num() + 1)("nme", acc_id(db).name)("acc", acc_id(db).get_id())
+            ("v", _reveal_value[acc_id]));
+      return;
+   }
+
+   // Create the reveal operation
+   reveal_create_operation reveal_op;
+   reveal_op.account = acc_id;
+   reveal_op.value = _reveal_value[acc_id];
+   reveal_op.maintenance_time = fc::time_point::now().sec_since_epoch();
+   reveal_op.witness_key = *_witness_key_cache[_witness_account[acc_id]];
+   tx.operations.push_back(reveal_op);
+   ilog("[${b}: ${nme}(${acc})] Reveal operation was sent, value: ${v}, hash: ${h}",
+         ("b", db.head_block_num() + 1)("nme", acc_id(db).name)("acc", acc_id(db).get_id())
+         ("v", _reveal_value[acc_id])("h", _reveal_hash[acc_id]));
+   _reveal_value[acc_id] = 0;
+
+   // Broadcast the block transaction
+   if (tx.operations.size()){
+      tx.validate();
+      tx.set_reference_block(dgpo.head_block_id);
+      tx.set_expiration(dgpo.time + fc::seconds(30));
+      tx.clear_signatures();
+
+      const auto &pkey = get_witness_private_key(*_witness_key_cache[_witness_account[acc_id]]);
+
+      if (pkey.valid()) {
+         tx.sign(*pkey, chain_props.chain_id);
+         try {
+            _network_broadcast_api->broadcast_transaction(tx);
+         }
+         catch (const fc::exception &e) {
+            elog("Caught exception while broadcasting tx ${id}:  ${e}",
+                  ("id", tx.id().str())("e", e.to_detail_string()));
+            throw;
+         }
+      }
+   }
+}
+
+fc::optional< fc::ecc::private_key > witness_plugin::get_witness_private_key( const public_key_type& public_key ) const {
+   for (const auto &key_pair: _private_keys) {
+      if (key_pair.first == public_key) {
+         return fc::optional< fc::ecc::private_key >(key_pair.second);
+      }
+   }
+   return fc::optional< fc::ecc::private_key >();
 }
 
 block_production_condition::block_production_condition_enum witness_plugin::block_production_loop()
@@ -300,6 +593,9 @@ block_production_condition::block_production_condition_enum witness_plugin::bloc
       case block_production_condition::shutdown:
          ilog( "shutdown producing block" );
          return result;
+      case block_production_condition::no_network:
+         ilog( "not connected to P2P network" );
+         return result;
       default:
          elog( "unknown condition ${result} while producing block", ("result", (unsigned char)result) );
          break;
@@ -320,7 +616,13 @@ block_production_condition::block_production_condition_enum witness_plugin::mayb
    if( !_production_enabled )
    {
       if( db.get_slot_time(1) >= now )
+      {
          _production_enabled = true;
+         ilog("Blockchain is synchronized, we have a recent block");
+
+         // run scheduling even if we are far from the maintenance
+         schedule_commit_reveal();
+      }
       else
          return block_production_condition::not_synced;
    }
@@ -374,6 +676,9 @@ block_production_condition::block_production_condition_enum witness_plugin::mayb
       return block_production_condition::lag;
    }
 
+   if( p2p_node() == nullptr )
+      return block_production_condition::no_network;
+
    auto block = db.generate_block(
       scheduled_time,
       scheduled_witness,
@@ -381,7 +686,7 @@ block_production_condition::block_production_condition_enum witness_plugin::mayb
       _production_skip_flags
       );
    capture("n", block.block_num())("t", block.timestamp)("c", now)("x", block.transactions.size());
-   fc::async( [this,block](){ p2p_node().broadcast(net::block_message(block)); } );
+   fc::async( [this,block](){ p2p_node()->broadcast(net::block_message(block)); } );
 
    return block_production_condition::produced;
 }

@@ -1,9 +1,16 @@
-FROM phusion/baseimage:0.11
-MAINTAINER The bitshares decentralized organisation
-
+# The image for building
+FROM phusion/baseimage:focal-1.2.0 as build 
 ENV LANG=en_US.UTF-8
+
+# from bitshares
+#FROM phusion/baseimage:focal-1.2.0 as build 
+#ENV LANG=en_US.UTF-8
+
+# Install dependencies
 RUN \
-    apt-get update -y && \
+    apt-get update && \
+    apt-get upgrade -y -o Dpkg::Options::="--force-confold" && \
+    apt-get update && \
     apt-get install -y \
       g++ \
       autoconf \
@@ -27,59 +34,85 @@ RUN \
       libtool \
       doxygen \
       ca-certificates \
-      fish \
     && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-ADD . /bitshares-core
-WORKDIR /bitshares-core
+ADD . /acloudbank-core
+WORKDIR /acloudbank-core
 
 # Compile
 RUN \
     ( git submodule sync --recursive || \
       find `pwd`  -type f -name .git | \
-	while read f; do \
-	  rel="$(echo "${f#$PWD/}" | sed 's=[^/]*/=../=g')"; \
-	  sed -i "s=: .*/.git/=: $rel/=" "$f"; \
-	done && \
+  while read f; do \
+    rel="$(echo "${f#$PWD/}" | sed 's=[^/]*/=../=g')"; \
+    sed -i "s=: .*/.git/=: $rel/=" "$f"; \
+  done && \
       git submodule sync --recursive ) && \
     git submodule update --init --recursive && \
     cmake \
         -DCMAKE_BUILD_TYPE=Release \
-	-DGRAPHENE_DISABLE_UNITY_BUILD=ON \
+  -DGRAPHENE_DISABLE_UNITY_BUILD=ON \
         . && \
     make witness_node cli_wallet get_dev_key && \
-    install -s programs/witness_node/witness_node programs/genesis_util/get_dev_key programs/cli_wallet/cli_wallet /usr/local/bin && \
+    install -s programs/witness_node/witness_node \
+               programs/genesis_util/get_dev_key \
+               programs/cli_wallet/cli_wallet \
+            /usr/local/bin && \
     #
     # Obtain version
-    mkdir /etc/bitshares && \
-    git rev-parse --short HEAD > /etc/bitshares/version && \
+    mkdir -p /etc/acloudbank && \
+    git rev-parse --short HEAD > /etc/acloudbank/version && \
     cd / && \
-    rm -rf /bitshares-core
+    rm -rf /acloudbank-core
 
-# Home directory $HOME
+# The final image
+FROM phusion/baseimage:focal-1.2.0
+LABEL maintainer="The acloudbank decentralized organisation"
+ENV LANG=en_US.UTF-8
+
+# Install required libraries
+RUN \
+    apt-get update && \
+    apt-get upgrade -y -o Dpkg::Options::="--force-confold" && \
+    apt-get update && \
+    apt-get install --no-install-recommends -y \
+      libcurl4 \
+      ca-certificates \
+    && \
+    mkdir -p /etc/acloudbank && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+COPY --from=build /usr/local/bin/* /usr/local/bin/
+COPY --from=build /etc/acloudbank/version /etc/acloudbank/
+
 WORKDIR /
-RUN useradd -s /bin/bash -m -d /var/lib/bitshares bitshares
-ENV HOME /var/lib/bitshares
-RUN chown bitshares:bitshares -R /var/lib/bitshares
+RUN groupadd -g 10001 acloudbank
+RUN useradd -u 10000 -g acloudbank -s /bin/bash -m -d /var/lib/acloudbank --no-log-init acloudbank
+ENV HOME /var/lib/acloudbank
+RUN chown acloudbank:acloudbank -R /var/lib/acloudbank
+
+# default exec/config files
+ADD docker/default_config.ini /etc/acloudbank/config.ini
+ADD docker/default_logging.ini /etc/acloudbank/logging.ini
+ADD docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod a+x /usr/local/bin/entrypoint.sh
 
 # Volume
-VOLUME ["/var/lib/bitshares", "/etc/bitshares"]
+VOLUME ["/var/lib/acloudbank", "/etc/acloudbank"]
 
 # rpc service:
 EXPOSE 8090
 # p2p service:
 EXPOSE 1776
 
-# default exec/config files
-ADD docker/default_config.ini /etc/bitshares/config.ini
-ADD docker/default_logging.ini /etc/bitshares/logging.ini
-ADD docker/bitsharesentry.sh /usr/local/bin/bitsharesentry.sh
-RUN chmod a+x /usr/local/bin/bitsharesentry.sh
-
 # Make Docker send SIGINT instead of SIGTERM to the daemon
 STOPSIGNAL SIGINT
 
+# Temporarily commented out due to permission issues caused by older versions, to be restored in a future version
+#USER acloudbank:acloudbank
+
 # default execute entry
-CMD ["/usr/local/bin/bitsharesentry.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

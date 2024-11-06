@@ -1,25 +1,5 @@
 /*
- * Copyright (c) 2017 Cryptonomex, Inc., and contributors.
- *
- * The MIT License
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * AcloudBank
  */
 
 #include <graphene/chain/database.hpp>
@@ -28,18 +8,19 @@
 #include <graphene/chain/account_object.hpp>
 #include <graphene/chain/asset_object.hpp>
 #include <graphene/chain/balance_object.hpp>
+#include <graphene/chain/ico_balance_object.hpp>
 #include <graphene/chain/block_summary_object.hpp>
 #include <graphene/chain/budget_record_object.hpp>
 #include <graphene/chain/buyback_object.hpp>
 #include <graphene/chain/chain_property_object.hpp>
 #include <graphene/chain/committee_member_object.hpp>
-#include <graphene/chain/confidential_object.hpp>
 #include <graphene/chain/fba_object.hpp>
 #include <graphene/chain/global_property_object.hpp>
 #include <graphene/chain/market_object.hpp>
 #include <graphene/chain/operation_history_object.hpp>
 #include <graphene/chain/proposal_object.hpp>
 #include <graphene/chain/special_authority_object.hpp>
+#include <graphene/chain/ticket_object.hpp>
 #include <graphene/chain/transaction_history_object.hpp>
 #include <graphene/chain/vesting_balance_object.hpp>
 #include <graphene/chain/withdraw_permission_object.hpp>
@@ -48,17 +29,23 @@
 #include <graphene/chain/worker_object.hpp>
 #include <graphene/chain/htlc_object.hpp>
 #include <graphene/chain/custom_authority_object.hpp>
+
 #include <graphene/chain/tnt/object.hpp>
+#include <graphene/chain/personal_data_object.hpp>
+#include <graphene/chain/content_card_object.hpp>
+#include <graphene/chain/permission_object.hpp>
+#include <graphene/chain/commit_reveal_object.hpp>
 
 #include <graphene/chain/account_evaluator.hpp>
 #include <graphene/chain/asset_evaluator.hpp>
 #include <graphene/chain/assert_evaluator.hpp>
 #include <graphene/chain/balance_evaluator.hpp>
+#include <graphene/chain/ico_balance_evaluator.hpp>
 #include <graphene/chain/committee_member_evaluator.hpp>
-#include <graphene/chain/confidential_evaluator.hpp>
 #include <graphene/chain/custom_evaluator.hpp>
 #include <graphene/chain/market_evaluator.hpp>
 #include <graphene/chain/proposal_evaluator.hpp>
+#include <graphene/chain/ticket_evaluator.hpp>
 #include <graphene/chain/transfer_evaluator.hpp>
 #include <graphene/chain/vesting_balance_evaluator.hpp>
 #include <graphene/chain/withdraw_permission_evaluator.hpp>
@@ -66,7 +53,12 @@
 #include <graphene/chain/worker_evaluator.hpp>
 #include <graphene/chain/htlc_evaluator.hpp>
 #include <graphene/chain/custom_authority_evaluator.hpp>
+
 #include <graphene/chain/tnt/evaluators.hpp>
+#include <graphene/chain/personal_data_evaluator.hpp>
+#include <graphene/chain/content_card_evaluator.hpp>
+#include <graphene/chain/permission_evaluator.hpp>
+#include <graphene/chain/commit_reveal_evaluator.hpp>
 
 #include <fc/crypto/digest.hpp>
 
@@ -74,68 +66,6 @@
 
 namespace graphene { namespace chain {
 
-// C++ requires that static class variables declared and initialized
-// in headers must also have a definition in a single source file,
-// else linker errors will occur [1].
-//
-// The purpose of this source file is to collect such definitions in
-// a single place.
-//
-// [1] http://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
-
-const uint8_t account_object::space_id;
-const uint8_t account_object::type_id;
-
-const uint8_t asset_object::space_id;
-const uint8_t asset_object::type_id;
-
-const uint8_t block_summary_object::space_id;
-const uint8_t block_summary_object::type_id;
-
-const uint8_t call_order_object::space_id;
-const uint8_t call_order_object::type_id;
-
-const uint8_t committee_member_object::space_id;
-const uint8_t committee_member_object::type_id;
-
-const uint8_t force_settlement_object::space_id;
-const uint8_t force_settlement_object::type_id;
-
-const uint8_t global_property_object::space_id;
-const uint8_t global_property_object::type_id;
-
-const uint8_t limit_order_object::space_id;
-const uint8_t limit_order_object::type_id;
-
-const uint8_t operation_history_object::space_id;
-const uint8_t operation_history_object::type_id;
-
-const uint8_t proposal_object::space_id;
-const uint8_t proposal_object::type_id;
-
-const uint8_t transaction_history_object::space_id;
-const uint8_t transaction_history_object::type_id;
-
-const uint8_t vesting_balance_object::space_id;
-const uint8_t vesting_balance_object::type_id;
-
-const uint8_t withdraw_permission_object::space_id;
-const uint8_t withdraw_permission_object::type_id;
-
-const uint8_t witness_object::space_id;
-const uint8_t witness_object::type_id;
-
-const uint8_t worker_object::space_id;
-const uint8_t worker_object::type_id;
-
-const uint8_t htlc_object::space_id;
-const uint8_t htlc_object::type_id;
-
-const uint8_t custom_authority_object::space_id;
-const uint8_t custom_authority_object::type_id;
-
-const uint8_t tank_object::space_id;
-const uint8_t tank_object::type_id;
 
 void database::initialize_evaluators()
 {
@@ -160,7 +90,6 @@ void database::initialize_evaluators()
    register_evaluator<limit_order_create_evaluator>();
    register_evaluator<limit_order_cancel_evaluator>();
    register_evaluator<call_order_update_evaluator>();
-   register_evaluator<bid_collateral_evaluator>();
    register_evaluator<transfer_evaluator>();
    register_evaluator<override_transfer_evaluator>();
    register_evaluator<asset_fund_fee_pool_evaluator>();
@@ -178,9 +107,7 @@ void database::initialize_evaluators()
    register_evaluator<withdraw_permission_delete_evaluator>();
    register_evaluator<worker_create_evaluator>();
    register_evaluator<balance_claim_evaluator>();
-   register_evaluator<transfer_to_blind_evaluator>();
-   register_evaluator<transfer_from_blind_evaluator>();
-   register_evaluator<blind_transfer_evaluator>();
+   register_evaluator<ico_balance_claim_evaluator>();
    register_evaluator<asset_claim_fees_evaluator>();
    register_evaluator<asset_update_issuer_evaluator>();
    register_evaluator<asset_claim_pool_evaluator>();
@@ -197,6 +124,17 @@ void database::initialize_evaluators()
    register_evaluator<tap_open_evaluator>();
    register_evaluator<tap_connect_evaluator>();
    register_evaluator<account_fund_connection_evaluator>();
+   register_evaluator<ticket_create_evaluator>();
+   register_evaluator<ticket_update_evaluator>();
+   register_evaluator<personal_data_create_evaluator>();
+   register_evaluator<personal_data_remove_evaluator>();
+   register_evaluator<content_card_create_evaluator>();
+   register_evaluator<content_card_update_evaluator>();
+   register_evaluator<content_card_remove_evaluator>();
+   register_evaluator<permission_create_evaluator>();
+   register_evaluator<permission_remove_evaluator>();
+   register_evaluator<commit_create_evaluator>();
+   register_evaluator<reveal_create_evaluator>();
 }
 
 void database::initialize_indexes()
@@ -218,9 +156,10 @@ void database::initialize_indexes()
    add_index< primary_index<vesting_balance_index> >();
    add_index< primary_index<worker_index> >();
    add_index< primary_index<balance_index> >();
-   add_index< primary_index<blinded_balance_index> >();
+   add_index< primary_index<ico_balance_index> >();
    add_index< primary_index< htlc_index> >();
    add_index< primary_index< custom_authority_index> >();
+   add_index< primary_index<ticket_index> >();
    add_index< primary_index<tank_index> >();
 
    //Implementation object indexes
@@ -240,8 +179,12 @@ void database::initialize_indexes()
    add_index< primary_index<simple_index<budget_record_object           > > >();
    add_index< primary_index< special_authority_index                      > >();
    add_index< primary_index< buyback_index                                > >();
-   add_index< primary_index<collateral_bid_index                          > >();
    add_index< primary_index< simple_index< fba_accumulator_object       > > >();
+
+   add_index< primary_index< personal_data_index,                       20> >();
+   add_index< primary_index< content_card_index,                        20> >();
+   add_index< primary_index< permission_index,                          20> >();
+   add_index< primary_index< commit_reveal_index,                       20> >();
 }
 
 void database::init_genesis(const genesis_state_type& genesis_state)
@@ -582,6 +525,18 @@ void database::init_genesis(const genesis_state_type& genesis_state)
       create<balance_object>([&handout,total_allocation,asset_id](balance_object& b) {
          b.balance = asset(handout.amount, asset_id);
          b.owner = handout.owner;
+      });
+
+      total_supplies[ asset_id ] += handout.amount;
+   }
+
+   // Create ico balances
+   for( const auto& handout : genesis_state.ico_balances )
+   {
+      const auto asset_id = get_asset_id(GRAPHENE_SYMBOL);
+      create<ico_balance_object>([&handout,total_allocation,asset_id](ico_balance_object& b) {
+         b.balance = asset(handout.amount, asset_id);
+         b.eth_address = handout.eth_address;
       });
 
       total_supplies[ asset_id ] += handout.amount;

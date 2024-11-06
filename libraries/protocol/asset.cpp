@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2015 Cryptonomex, Inc., and contributors.
+ * Copyright (c) 2020-2023 Revolution Populi Limited, and contributors.
  *
  * The MIT License
  *
@@ -264,27 +265,40 @@ namespace graphene { namespace protocol {
          FC_CAPTURE_AND_RETHROW( (*this) )
       }
 
-      // This function is kept here due to potential different behavior in edge cases.
-      // TODO check after core-1270 hard fork to see if we can safely remove it
-      price price_feed::max_short_squeeze_price_before_hf_1270()const
-      {
-         // settlement price is in debt/collateral
-         boost::rational<int128_t> sp( settlement_price.base.amount.value, settlement_price.quote.amount.value );
-         boost::rational<int128_t> ratio( GRAPHENE_COLLATERAL_RATIO_DENOM, maximum_short_squeeze_ratio );
-         auto cp = sp * ratio;
-
-         while( cp.numerator() > GRAPHENE_MAX_SHARE_SUPPLY || cp.denominator() > GRAPHENE_MAX_SHARE_SUPPLY )
-            cp = boost::rational<int128_t>( (cp.numerator() >> 1)+(cp.numerator()&1),
-                                            (cp.denominator() >> 1)+(cp.denominator()&1) );
-
-         return (  asset( static_cast<int64_t>(cp.numerator()), settlement_price.base.asset_id )
-                 / asset( static_cast<int64_t>(cp.denominator()), settlement_price.quote.asset_id ) );
-      }
-
+      // Documentation in header.
+      // Calculation:  MSSP = settlement_price / MSSR
       price price_feed::max_short_squeeze_price()const
       {
          // settlement price is in debt/collateral
          return settlement_price * ratio_type( GRAPHENE_COLLATERAL_RATIO_DENOM, maximum_short_squeeze_ratio );
+      }
+
+      // Documentation in header.
+      // Calculation:  MCOP = settlement_price / (MSSR - MCFR); result is in debt/collateral
+      price price_feed::margin_call_order_price(const fc::optional<uint16_t> maybe_mcfr)const
+      {
+         const uint16_t mcfr = maybe_mcfr.valid() ? *maybe_mcfr : 0;
+         uint16_t numerator = (mcfr < maximum_short_squeeze_ratio) ?
+            (maximum_short_squeeze_ratio - mcfr) : GRAPHENE_COLLATERAL_RATIO_DENOM; // won't underflow
+         if (numerator < GRAPHENE_COLLATERAL_RATIO_DENOM)
+            numerator = GRAPHENE_COLLATERAL_RATIO_DENOM; // floor at 1.00
+         return settlement_price * ratio_type( GRAPHENE_COLLATERAL_RATIO_DENOM, numerator );
+      }
+
+      // Reason for this function is explained in header.
+      // Calculation: (MSSR - MCFR) / MSSR
+      ratio_type price_feed::margin_call_pays_ratio(const fc::optional<uint16_t> maybe_mcfr)const
+      {
+         if (!maybe_mcfr.valid())
+            return ratio_type(1,1);
+         const uint16_t mcfr = *maybe_mcfr;
+         uint16_t numerator = (mcfr < maximum_short_squeeze_ratio) ?
+            (maximum_short_squeeze_ratio - mcfr) : GRAPHENE_COLLATERAL_RATIO_DENOM; // won't underflow
+         if (numerator < GRAPHENE_COLLATERAL_RATIO_DENOM)
+            numerator = GRAPHENE_COLLATERAL_RATIO_DENOM; // floor at 1.00
+         return ratio_type( numerator, maximum_short_squeeze_ratio );
+         // Note: This ratio, if it multiplied margin_call_order_price, would yield the
+         // max_short_squeeze_price, apart perhaps for truncation (rounding) error.
       }
 
       price price_feed::maintenance_collateralization()const

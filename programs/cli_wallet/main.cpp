@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2015 Cryptonomex, Inc., and contributors.
+ * Copyright (c) 2020-2023 Revolution Populi Limited, and contributors.
  *
  * The MIT License
  *
@@ -35,6 +36,7 @@
 #include <fc/stacktrace.hpp>
 
 #include <graphene/app/api.hpp>
+#include <graphene/app/util.hpp>
 #include <graphene/chain/config.hpp>
 #include <graphene/egenesis/egenesis.hpp>
 #include <graphene/utilities/key_conversion.hpp>
@@ -219,6 +221,8 @@ int main( int argc, char** argv )
          }
       }
 
+      log_system_info();
+
       // but allow CLI to override
       if( options.count("server-rpc-endpoint") )
          wdata.ws_server = options.at("server-rpc-endpoint").as<std::string>();
@@ -243,9 +247,9 @@ int main( int argc, char** argv )
       fc::api<wallet_api> wapi(wapiptr);
 
       std::shared_ptr<fc::http::websocket_server> _websocket_server;
-      if( options.count("rpc-endpoint") )
+      if( options.count("rpc-endpoint") > 0 )
       {
-         _websocket_server = std::make_shared<fc::http::websocket_server>();
+         _websocket_server = std::make_shared<fc::http::websocket_server>("");
          _websocket_server->on_connection([&wapi]( const fc::http::websocket_connection_ptr& c ){
             auto wsc = std::make_shared<fc::rpc::websocket_api_connection>(c, GRAPHENE_MAX_NESTED_OBJECTS);
             wsc->register_api(wapi);
@@ -261,9 +265,9 @@ int main( int argc, char** argv )
          cert_pem = options.at("rpc-tls-certificate").as<string>();
 
       std::shared_ptr<fc::http::websocket_tls_server> _websocket_tls_server;
-      if( options.count("rpc-tls-endpoint") )
+      if( options.count("rpc-tls-endpoint") > 0 )
       {
-         _websocket_tls_server = std::make_shared<fc::http::websocket_tls_server>(cert_pem);
+         _websocket_tls_server = std::make_shared<fc::http::websocket_tls_server>(cert_pem, "", "");
          _websocket_tls_server->on_connection([&wapi]( const fc::http::websocket_connection_ptr& c ){
             auto wsc = std::make_shared<fc::rpc::websocket_api_connection>(c, GRAPHENE_MAX_NESTED_OBJECTS);
             wsc->register_api(wapi);
@@ -276,9 +280,9 @@ int main( int argc, char** argv )
       }
 
       std::shared_ptr<fc::http::websocket_server> _http_ws_server;
-      if( options.count("rpc-http-endpoint" ) )
+      if( options.count("rpc-http-endpoint" ) > 0 )
       {
-         _http_ws_server = std::make_shared<fc::http::websocket_server>();
+         _http_ws_server = std::make_shared<fc::http::websocket_server>("");
          ilog( "Listening for incoming HTTP and WS RPC requests on ${p}",
                ("p", options.at("rpc-http-endpoint").as<string>()) );
          _http_ws_server->on_connection([&wapi]( const fc::http::websocket_connection_ptr& c ){

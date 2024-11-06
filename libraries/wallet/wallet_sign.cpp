@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2017 Cryptonomex, Inc., and contributors.
+ * Copyright (c) 2020-2023 Revolution Populi Limited, and contributors.
  *
  * The MIT License
  *
@@ -23,6 +24,12 @@
  */
 
 #include <fc/crypto/aes.hpp>
+#include <fc/crypto/base64.hpp>
+
+#include <boost/algorithm/string/split.hpp>
+#include <boost/algorithm/string.hpp>
+
+#include <graphene/chain/hardfork.hpp>
 
 #include "wallet_api_impl.hpp"
 #include <graphene/wallet/wallet.hpp>
@@ -138,18 +145,35 @@ namespace graphene { namespace wallet { namespace detail {
       try {
          account_object from_account = get_account(from);
          md.from = from_account.options.memo_key;
-      } catch (const fc::exception& e) {
-         md.from =  self.get_public_key( from );
+      } catch (const fc::exception&) {
+         // check if the string itself is a pubkey, if not, consider it as a label
+         try {
+            md.from = public_key_type( from );
+         } catch (const fc::exception&) {
+            md.from = self.get_public_key( from );
+         }
       }
       // same as above, for destination key
       try {
          account_object to_account = get_account(to);
          md.to = to_account.options.memo_key;
-      } catch (const fc::exception& e) {
-         md.to = self.get_public_key( to );
+      } catch (const fc::exception&) {
+         // check if the string itself is a pubkey, if not, consider it as a label
+         try {
+            md.to = public_key_type( to );
+         } catch (const fc::exception&) {
+            md.to = self.get_public_key( to );
+         }
       }
 
-      md.set_message(get_private_key(md.from), md.to, memo);
+      // try to get private key of from and sign, if that fails, try to sign with to
+      try {
+         md.set_message(get_private_key(md.from), md.to, memo);
+      } catch (const fc::exception&) {
+         std::swap( md.from, md.to );
+         md.set_message(get_private_key(md.from), md.to, memo);
+         std::swap( md.from, md.to );
+      }
       return md;
    }
 
@@ -161,10 +185,10 @@ namespace graphene { namespace wallet { namespace detail {
       const memo_data *memo = &md;
 
       try {
-         FC_ASSERT( _keys.count(memo->to) || _keys.count(memo->from),
+         FC_ASSERT( _keys.count(memo->to) > 0 || _keys.count(memo->from) > 0,
                     "Memo is encrypted to a key ${to} or ${from} not in this wallet.",
                     ("to", memo->to)("from",memo->from) );
-         if( _keys.count(memo->to) ) {
+         if( _keys.count(memo->to) > 0 ) {
             auto my_key = wif_to_key(_keys.at(memo->to));
             FC_ASSERT(my_key, "Unable to recover private key to decrypt memo. Wallet may be corrupted.");
             clear_text = memo->get_message(*my_key, memo->from);
@@ -312,7 +336,18 @@ namespace graphene { namespace wallet { namespace detail {
 
    signed_transaction wallet_api_impl::sign_transaction( signed_transaction tx, bool broadcast )
    {
+      return sign_transaction2(tx, {}, broadcast);
+   }
+
+   signed_transaction wallet_api_impl::sign_transaction2( signed_transaction tx,
+                                                         const vector<public_key_type>& signing_keys, bool broadcast)
+   {
       set<public_key_type> approving_key_set = get_owned_required_keys(tx);
+
+      // Add any explicit keys to the approving_key_set
+      for (const public_key_type& explicit_key : signing_keys) {
+         approving_key_set.insert(explicit_key);
+      }
 
       auto dyn_props = get_dynamic_global_properties();
       tx.set_reference_block( dyn_props.head_block_id );
@@ -485,6 +520,232 @@ namespace graphene { namespace wallet { namespace detail {
       set_operation_fees(tx, get_global_properties().parameters.get_current_fees());
       tx.validate();
       return sign_transaction(tx, broadcast);
+   }
+
+   signed_transaction wallet_api_impl::create_personal_data( const string& subject_account,
+                     const string& operator_account,
+                     const string& url,
+                     const string& hash,
+                     const string& storage_data,
+                     bool broadcast )
+   { try {
+      FC_ASSERT( !self.is_locked() );
+
+      auto subject_id = get_account(subject_account).get_id();
+      auto operator_id = get_account(operator_account).get_id();
+
+      personal_data_create_operation create_pd_op;
+
+      create_pd_op.subject_account = subject_id;
+      create_pd_op.operator_account = operator_id;
+      create_pd_op.url = url;
+      create_pd_op.hash = hash;
+      create_pd_op.storage_data = storage_data;
+
+      signed_transaction tx;
+      tx.operations.push_back(create_pd_op);
+      set_operation_fees(tx, _remote_db->get_global_properties().parameters.get_current_fees());
+      tx.validate();
+
+      return sign_transaction(tx, broadcast);
+   } FC_CAPTURE_AND_RETHROW( (subject_account)(operator_account)(url)(hash)(storage_data)(broadcast) ) }
+
+   signed_transaction wallet_api_impl::remove_personal_data( const string subject_account, 
+                     const string operator_account,
+                     const string hash,
+                     bool broadcast )
+   { try {
+      auto subject_id = get_account(subject_account).get_id();
+      auto operator_id = get_account(operator_account).get_id();
+
+      personal_data_remove_operation remove_pd_op;
+
+      remove_pd_op.subject_account = subject_id;
+      remove_pd_op.operator_account = operator_id;
+      remove_pd_op.hash = hash;
+
+      signed_transaction tx;
+      tx.operations.push_back(remove_pd_op);         
+      tx.validate();
+
+      return sign_transaction(tx, broadcast);
+   } FC_CAPTURE_AND_RETHROW( (subject_account)(operator_account)(broadcast) ) }
+
+   std::vector<personal_data_object> wallet_api_impl::get_personal_data( const string subject_account, const string operator_account) const
+   {
+      auto subject_id = get_account(subject_account).get_id();
+      auto operator_id = get_account(operator_account).get_id();
+      auto pd_data = _remote_db->get_personal_data(subject_id, operator_id);      
+      return pd_data;
+   }
+
+   personal_data_object wallet_api_impl::get_last_personal_data( const string subject_account, const string operator_account) const
+   {
+      auto subject_id = get_account(subject_account).get_id();
+      auto operator_id = get_account(operator_account).get_id();
+      auto pd_data = _remote_db->get_last_personal_data(subject_id, operator_id);  
+      if (pd_data.valid()){
+         return *pd_data;
+      }
+      return personal_data_object();
+   }
+
+   signed_transaction wallet_api_impl::create_content_card( const string subject_account,
+      const string hash, const string url,
+      const string type, const string description,
+      const string content_key, const string& storage_data,
+      bool broadcast )
+   { try {
+      auto subject_id = get_account(subject_account).get_id();
+
+      content_card_create_operation create_content_op;
+
+      create_content_op.subject_account = subject_id;
+      create_content_op.hash = hash;
+      create_content_op.url = url;
+      create_content_op.type = type;
+      create_content_op.description = description;
+      create_content_op.content_key = content_key;
+      create_content_op.storage_data = storage_data;
+
+      signed_transaction tx;
+      tx.operations.push_back(create_content_op);
+      set_operation_fees(tx, _remote_db->get_global_properties().parameters.get_current_fees());
+      tx.validate();
+
+      return sign_transaction(tx, broadcast);
+   } FC_CAPTURE_AND_RETHROW( (subject_account)(hash)(url)(type)(description)(content_key)(storage_data)(broadcast) ) }
+
+   signed_transaction wallet_api_impl::update_content_card( const string subject_account,
+      const string hash, const string url,
+      const string type, const string description,
+      const string content_key, const string& storage_data,
+      bool broadcast )
+   { try {
+      auto subject_id = get_account(subject_account).get_id();
+
+      content_card_update_operation update_content_op;
+
+      update_content_op.subject_account = subject_id;
+      update_content_op.hash = hash;
+      update_content_op.url = url;
+      update_content_op.type = type;
+      update_content_op.description = description;
+      update_content_op.content_key = content_key;
+      update_content_op.storage_data = storage_data;
+
+      signed_transaction tx;
+      tx.operations.push_back(update_content_op);
+      set_operation_fees(tx, _remote_db->get_global_properties().parameters.get_current_fees());
+      tx.validate();
+
+      return sign_transaction(tx, broadcast);
+   } FC_CAPTURE_AND_RETHROW( (subject_account)(hash)(url)(type)(description)(content_key)(storage_data)(broadcast) ) }
+
+   signed_transaction wallet_api_impl::remove_content_card( const string subject_account,
+                                             uint64_t content_id,
+                                             bool broadcast )
+   { try {
+      auto subject_id = get_account(subject_account).get_id();
+
+      content_card_remove_operation remove_content_op;
+
+      remove_content_op.subject_account = subject_id;
+      remove_content_op.content_id = content_card_id_type(content_id);
+
+      signed_transaction tx;
+      tx.operations.push_back(remove_content_op);         
+      tx.validate();
+
+      return sign_transaction(tx, broadcast);
+   } FC_CAPTURE_AND_RETHROW( (subject_account)(content_id)(broadcast) ) }
+
+   signed_transaction wallet_api_impl::create_permission( const string subject_account,
+      const string operator_account,
+      const string permission_type,
+      const string object_id,
+      const string content_key,
+      bool broadcast )
+   { try {
+      auto subject_id = get_account(subject_account).get_id();
+      auto operator_id = get_account(operator_account).get_id();
+
+      permission_create_operation create_perm_op;
+
+      std::vector<std::string> subs;
+      boost::split(subs, object_id, boost::is_any_of("."), boost::token_compress_on);
+      FC_ASSERT( subs.size() == 3, "object id is must contain 3 integers" );
+      uint8_t s = std::atoi(subs[0].c_str());
+      uint8_t t = std::atoi(subs[1].c_str());
+      uint8_t i = std::atoi(subs[2].c_str());
+      object_id_type obj_id(s, t, i);
+
+      create_perm_op.subject_account = subject_id;
+      create_perm_op.operator_account = operator_id;
+      create_perm_op.permission_type = permission_type;
+      create_perm_op.object_id = obj_id;
+      create_perm_op.content_key = content_key;
+
+      signed_transaction tx;
+      tx.operations.push_back(create_perm_op);
+      set_operation_fees(tx, _remote_db->get_global_properties().parameters.get_current_fees());
+      tx.validate();
+
+      return sign_transaction(tx, broadcast);
+   } FC_CAPTURE_AND_RETHROW( (subject_account)(operator_account)(permission_type)(object_id)(content_key)(broadcast) ) }
+
+   signed_transaction wallet_api_impl::remove_permission( const string subject_account,
+      uint64_t permission_id,
+      bool broadcast )
+   { try {
+      auto subject_id = get_account(subject_account).get_id();
+
+      permission_remove_operation remove_perm_op;
+
+      remove_perm_op.subject_account = subject_id;
+      remove_perm_op.permission_id = permission_id_type(permission_id);
+
+      signed_transaction tx;
+      tx.operations.push_back(remove_perm_op);
+      tx.validate();
+
+      return sign_transaction(tx, broadcast);
+   } FC_CAPTURE_AND_RETHROW( (subject_account)(permission_id)(broadcast) ) }
+
+   content_card_object wallet_api_impl::get_content_card_by_id( uint64_t content_id ) const
+   {
+      auto content_card = _remote_db->get_content_card_by_id(content_card_id_type(content_id));
+      if (content_card.valid()){
+         return *content_card;
+      }
+      return content_card_object();
+   }
+
+   std::vector<content_card_object> wallet_api_impl::get_content_cards( const string subject_account,
+         uint64_t content_id,
+         unsigned limit ) const
+   {
+      auto subject_id = get_account(subject_account).get_id();      
+      auto contents = _remote_db->get_content_cards(subject_id, content_card_id_type(content_id), limit);
+      return contents;
+   }
+
+   permission_object wallet_api_impl::get_permission_by_id( uint64_t permission_id ) const
+   {
+      auto perm = _remote_db->get_permission_by_id(permission_id_type(permission_id));
+      if (perm.valid()){
+         return *perm;
+      }
+      return permission_object();
+   }
+
+   std::vector<permission_object> wallet_api_impl::get_permissions( const string& operator_account,
+                     uint64_t permission_id,
+                     unsigned limit ) const
+   {
+      auto operator_id = get_account(operator_account).get_id();      
+      auto permissions = _remote_db->get_permissions(operator_id, permission_id_type(permission_id), limit);
+      return permissions;
    }
 
 }}} // namespace graphene::wallet::detail

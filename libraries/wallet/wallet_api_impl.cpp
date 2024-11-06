@@ -1,25 +1,6 @@
 /*
- * Copyright (c) 2017 Cryptonomex, Inc., and contributors.
+ * AcloudBank
  *
- * The MIT License
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
  */
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/range/adaptors.hpp>
@@ -56,9 +37,15 @@ namespace graphene { namespace wallet { namespace detail {
         _remote_api(rapi),
         _remote_db(rapi->database()),
         _remote_net_broadcast(rapi->network_broadcast()),
-        _remote_hist(rapi->history()),
-        _custom_operations(rapi->custom())
+        _remote_hist(rapi->history())
    {
+      try {
+         _custom_operations = rapi->custom_operations();
+      }
+      catch(const fc::exception& e)
+      {
+         wlog("Custom operations API is not active on server.");
+      }
       chain_id_type remote_chain_id = _remote_db->get_chain_id();
       if( remote_chain_id != _chain_id )
       {
@@ -130,7 +117,7 @@ namespace graphene { namespace wallet { namespace detail {
 
       fc::mutable_variant_object result;
       //result["blockchain_name"]        = BLOCKCHAIN_NAME;
-      //result["blockchain_description"] = BTS_BLOCKCHAIN_DESCRIPTION;
+      //result["blockchain_description"] = RQRX_BLOCKCHAIN_DESCRIPTION;
       result["client_version"]           = client_version;
       result["graphene_revision"]        = graphene::utilities::git_revision_sha;
       result["graphene_revision_age"]    = fc::get_approximate_relative_time_string( fc::time_point_sec(
@@ -199,7 +186,8 @@ namespace graphene { namespace wallet { namespace detail {
    void wallet_api_impl::init_prototype_ops()
    {
       operation op;
-      for( int t=0; t<op.count(); t++ )
+      int64_t op_count = op.count();
+      for( int64_t t=0; t<op_count; t++ )
       {
          op.set_which( t );
          op.visit( op_prototype_visitor(t, _prototype_ops) );

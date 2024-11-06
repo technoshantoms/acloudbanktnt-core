@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2015 Cryptonomex, Inc., and contributors.
+ * Copyright (c) 2020-2023 Revolution Populi Limited, and contributors.
  *
  * The MIT License
  *
@@ -47,6 +48,12 @@ void balance_claim_operation::validate()const
 {
    FC_ASSERT( fee == asset() );
    FC_ASSERT( balance_owner_key != public_key_type() );
+}
+
+void ico_balance_claim_operation::validate()const
+{
+   FC_ASSERT( fee == asset() );
+   FC_ASSERT( eth_pub_key.size() == 128 );
 }
 
 /**
@@ -110,5 +117,9 @@ void operation_get_required_authorities( const operation& op,
 }
 
 } } // namespace graphene::protocol
+
+GRAPHENE_IMPLEMENT_EXTERNAL_SERIALIZATION( graphene::protocol::generic_operation_result )
+GRAPHENE_IMPLEMENT_EXTERNAL_SERIALIZATION( graphene::protocol::generic_exchange_operation_result )
+GRAPHENE_IMPLEMENT_EXTERNAL_SERIALIZATION( graphene::protocol::extendable_operation_result_dtl )
 
 GRAPHENE_IMPLEMENT_EXTERNAL_SERIALIZATION( graphene::protocol::op_wrapper )

@@ -1,25 +1,6 @@
 /*
- * Copyright (c) 2018 oxarbitrage, and contributors.
- *
- * The MIT License
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * AcloudBank
+ * 
  */
 
 #include <boost/test/unit_test.hpp>
@@ -40,7 +21,8 @@ BOOST_AUTO_TEST_CASE( asset_holders )
    graphene::app::asset_api asset_api(app);
 
    // create an asset and some accounts
-   create_bitasset("USD", account_id_type());
+   auto nathan = create_account("nathan");
+   create_user_issued_asset("USD", nathan, 0);
    auto dan = create_account("dan");
    auto bob = create_account("bob");
    auto alice = create_account("alice");
@@ -65,7 +47,8 @@ BOOST_AUTO_TEST_CASE( api_limit_get_asset_holders )
    graphene::app::asset_api asset_api(app);
 
    // create an asset and some accounts
-   create_bitasset("USD", account_id_type());
+   auto nathan = create_account("nathan");
+   create_user_issued_asset("USD", nathan, 0);
    auto dan = create_account("dan");
    auto bob = create_account("bob");
    auto alice = create_account("alice");

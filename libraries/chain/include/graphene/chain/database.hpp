@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2015 Cryptonomex, Inc., and contributors.
+ * Copyright (c) 2020-2023 Revolution Populi Limited, and contributors.
  *
  * The MIT License
  *
@@ -29,6 +30,7 @@
 #include <graphene/chain/node_property_object.hpp>
 #include <graphene/chain/account_object.hpp>
 #include <graphene/chain/asset_object.hpp>
+#include <graphene/chain/commit_reveal_object.hpp>
 #include <graphene/chain/fork_database.hpp>
 #include <graphene/chain/block_database.hpp>
 #include <graphene/chain/genesis_state.hpp>
@@ -57,7 +59,6 @@ namespace graphene { namespace chain {
    class witness_object;
    class force_settlement_object;
    class limit_order_object;
-   class collateral_bid_object;
    class call_order_object;
 
    struct budget_record;
@@ -109,6 +110,7 @@ namespace graphene { namespace chain {
 
          /**
           * @brief Rebuild object graph from block history and open detabase
+          * @param data_dir the path to store the database
           *
           * This method may be called after or instead of @ref database::open, and will rebuild the object graph by
           * replaying blockchain history. When this method exits successfully, the database will be open.
@@ -117,6 +119,7 @@ namespace graphene { namespace chain {
 
          /**
           * @brief wipe Delete database from disk, and potentially the raw chain as well.
+          * @param data_dir the path to store the database
           * @param include_blocks If true, delete the raw chain as well as the database.
           *
           * Will close the database before wiping. Database will be closed when this function returns.
@@ -259,7 +262,12 @@ namespace graphene { namespace chain {
 
          void update_witness_schedule();
 
+         //////////////////// db_commit_reveal.cpp ////////////////////
+      private:
+         uint64_t get_commit_reveal_seed(const vector<account_id_type>& accounts) const;
+         vector<account_id_type> filter_commit_reveal_participant(const vector<account_id_type>& accounts) const;
          //////////////////// db_getter.cpp ////////////////////
+      public:
 
          const chain_id_type&                   get_chain_id()const;
          const asset_object&                    get_core_asset()const;
@@ -304,8 +312,8 @@ namespace graphene { namespace chain {
          template<typename EvaluatorType>
          void register_evaluator()
          {
-            _operation_evaluators[
-               operation::tag<typename EvaluatorType::operation_type>::value].reset( new op_evaluator_impl<EvaluatorType>() );
+            _operation_evaluators[operation::tag<typename EvaluatorType::operation_type>::value]
+                  = std::make_unique<op_evaluator_impl<EvaluatorType>>();
          }
 
          //////////////////// db_balance.cpp ////////////////////
@@ -330,7 +338,7 @@ namespace graphene { namespace chain {
          void deposit_market_fee_vesting_balance(const account_id_type &account_id, const asset &delta);
         /**
           * @brief Retrieve a particular account's market fee vesting balance in a given asset
-          * @param owner Account whose balance should be retrieved
+          * @param account_id Account whose balance should be retrieved
           * @param asset_id ID of the asset to get balance in
           * @return owner's balance in asset
           */
@@ -370,13 +378,12 @@ namespace graphene { namespace chain {
 
          //////////////////// db_market.cpp ////////////////////
 
-         /// @{ @group Market Helpers
+         /// @ingroup Market Helpers
+         /// @{
          void globally_settle_asset( const asset_object& bitasset, const price& settle_price );
          void cancel_settle_order(const force_settlement_object& order, bool create_virtual_op = true);
          void cancel_limit_order(const limit_order_object& order, bool create_virtual_op = true, bool skip_cancel_fee = false);
          void revive_bitasset( const asset_object& bitasset );
-         void cancel_bid(const collateral_bid_object& bid, bool create_virtual_op = true);
-         void execute_bid( const collateral_bid_object& bid, share_type debt_covered, share_type collateral_from_fund, const price_feed& current_feed );
 
       private:
          template<typename IndexType>
@@ -387,14 +394,14 @@ namespace graphene { namespace chain {
       public:
          /**
           * @brief Process a new limit order through the markets
-          * @param order The new order to process
+          * @param new_order_object The new order to process
+          * @param allow_black_swan whether to allow a black swan event
           * @return true if order was completely filled; false otherwise
           *
           * This function takes a new limit order, and runs the markets attempting to match it with existing orders
           * already on the books.
           */
          ///@{
-         bool apply_order_before_hardfork_625(const limit_order_object& new_order_object, bool allow_black_swan = true);
          bool apply_order(const limit_order_object& new_order_object, bool allow_black_swan = true);
          ///@}
 
@@ -410,9 +417,30 @@ namespace graphene { namespace chain {
           */
          ///@{
          int match( const limit_order_object& taker, const limit_order_object& maker, const price& trade_price );
+         /***
+          * @brief Match limit order as taker to a call order as maker
+          * @param taker the order that is removing liquidity from the book
+          * @param maker the order that put liquidity on the book
+          * @param trade_price the price the trade should execute at
+          * @param feed_price the price of the current feed
+          * @param maintenance_collateral_ratio the maintenance collateral ratio
+          * @param maintenance_collateralization the maintenance collateralization
+          * @param call_pays_price price call order pays. Call order may pay more collateral
+          *    than limit order takes if call order subject to a margin call fee.
+          * @returns 0 if no orders were matched, 1 if taker was filled, 2 if maker was filled, 3 if both were filled
+          */
          int match( const limit_order_object& taker, const call_order_object& maker, const price& trade_price,
                     const price& feed_price, const uint16_t maintenance_collateral_ratio,
-                    const optional<price>& maintenance_collateralization );
+                    const optional<price>& maintenance_collateralization,
+                    const price& call_pays_price);
+         // If separate call_pays_price not provided, assume call pays at trade_price:
+         int match( const limit_order_object& taker, const call_order_object& maker, const price& trade_price,
+                    const price& feed_price, const uint16_t maintenance_collateral_ratio,
+                    const optional<price>& maintenance_collateralization) {
+            return match(taker, maker, trade_price, feed_price, maintenance_collateral_ratio,
+                         maintenance_collateralization, trade_price);
+         }
+
          ///@}
 
          /// Matches the two orders, the first parameter is taker, the second is maker.
@@ -424,12 +452,37 @@ namespace graphene { namespace chain {
                    const price& fill_price);
 
          /**
+          * @brief fills limit order
+          * @param order the order
+          * @param pays what the account is paying
+          * @param receives what the account is receiving
+          * @param cull_if_small take care of dust
+          * @param fill_price the transaction price
+          * @param is_maker TRUE if this order is maker, FALSE if taker
           * @return true if the order was completely filled and thus freed.
           */
-         bool fill_limit_order( const limit_order_object& order, const asset& pays, const asset& receives, bool cull_if_small,
-                                const price& fill_price, const bool is_maker );
+         bool fill_limit_order( const limit_order_object& order, const asset& pays, const asset& receives,
+               bool cull_if_small, const price& fill_price, const bool is_maker );
+         /***
+          * @brief attempt to fill a call order
+          * @param order the order
+          * @param pays what the buyer pays for the collateral
+          * @param receives the collateral received by the buyer
+          * @param fill_price the price the transaction executed at
+          * @param is_maker TRUE if the buyer is the maker, FALSE if the buyer is the taker
+          * @param margin_fee Margin call fees paid in collateral asset
+          * @returns TRUE if the order was completely filled
+          */
          bool fill_call_order( const call_order_object& order, const asset& pays, const asset& receives,
-                               const price& fill_price, const bool is_maker );
+                               const price& fill_price, const bool is_maker, const asset& margin_fee );
+
+         // Overload provides compatible default value for margin_fee: (margin_fee.asset_id == pays.asset_id)
+         bool fill_call_order( const call_order_object& order, const asset& pays, const asset& receives,
+                               const price& fill_price, const bool is_maker )
+         {
+            return fill_call_order( order, pays, receives, fill_price, is_maker, asset(0, pays.asset_id) );
+         }
+
          bool fill_settle_order( const force_settlement_object& settle, const asset& pays, const asset& receives,
                                  const price& fill_price, const bool is_maker );
 
@@ -439,8 +492,17 @@ namespace graphene { namespace chain {
          // helpers to fill_order
          void pay_order( const account_object& receiver, const asset& receives, const asset& pays );
 
-         asset calculate_market_fee(const asset_object& recv_asset, const asset& trade_amount);
-         asset pay_market_fees(const account_object* seller, const asset_object& recv_asset, const asset& receives );
+         /**
+          * @brief Calculate the market fee that is to be taken
+          * @param trade_asset the asset (passed in to avoid a lookup)
+          * @param trade_amount the quantity that the fee calculation is based upon
+          * @param is_maker TRUE if this is the fee for a maker, FALSE if taker
+          */
+         asset calculate_market_fee( const asset_object& trade_asset, const asset& trade_amount,
+                                     const bool& is_maker )const;
+         asset pay_market_fees(const account_object* seller, const asset_object& recv_asset, const asset& receives,
+                               const bool& is_maker, const optional<asset>& calculated_market_fees = {});
+         asset pay_force_settle_fees(const asset_object& collecting_asset, const asset& collat_receives);
          ///@}
 
 
@@ -502,7 +564,7 @@ namespace graphene { namespace chain {
 
          //////////////////// db_block.cpp ////////////////////
 
-       public:
+      public:
          // these were formerly private, but they have a fairly well-defined API, so let's make them public
          void                  apply_block( const signed_block& next_block, uint32_t skip = skip_nothing );
          processed_transaction apply_transaction( const signed_transaction& trx, uint32_t skip = skip_nothing );
@@ -527,6 +589,9 @@ namespace graphene { namespace chain {
          uint32_t update_witness_missed_blocks( const signed_block& b );
 
          //////////////////// db_update.cpp ////////////////////
+      public:
+         generic_operation_result process_tickets();
+      private:
          void update_global_dynamic_data( const signed_block& b, const uint32_t missed_blocks );
          void update_signing_witness(const witness_object& signing_witness, const signed_block& new_block);
          void update_last_irreversible_block();
@@ -548,6 +613,7 @@ namespace graphene { namespace chain {
 
          void initialize_budget_record( fc::time_point_sec now, budget_record& rec )const;
          void process_budget();
+         fc::uint128_t calculate_workers_budget();
          void pay_workers( share_type& budget );
          void perform_chain_maintenance(const signed_block& next_block, const global_property_object& global_props);
          void update_active_witnesses();
@@ -589,9 +655,12 @@ namespace graphene { namespace chain {
          uint32_t                          _current_virtual_op   = 0;
 
          vector<uint64_t>                  _vote_tally_buffer;
+         vector<uint64_t>                  _cm_vote_for_worker_buffer; // flat_map saves memory, but vector is still faster
+         vector<vector<account_id_type>>   _cm_support_worker_buffer;
          vector<uint64_t>                  _witness_count_histogram_buffer;
          vector<uint64_t>                  _committee_count_histogram_buffer;
-         uint64_t                          _total_voting_stake;
+         uint64_t                          _total_voting_stake[2]; // 0=committee, 1=witness,
+                                                                   // as in vote_id_type::vote_type
 
          flat_map<uint32_t,block_id_type>  _checkpoints;
 
@@ -613,9 +682,6 @@ namespace graphene { namespace chain {
          // Counts nested proposal updates
          uint32_t                           _push_proposal_nesting_depth = 0;
 
-         /// Tracks assets affected by bitshares-core issue #453 before hard fork #615 in one block
-         flat_set<asset_id_type>           _issue_453_affected_assets;
-
          /// Pointers to core asset object and global objects who will have immutable addresses after created
          ///@{
          const asset_object*                    _p_core_asset_obj          = nullptr;
@@ -624,6 +690,27 @@ namespace graphene { namespace chain {
          const dynamic_global_property_object*  _p_dyn_global_prop_obj     = nullptr;
          const chain_property_object*           _p_chain_property_obj      = nullptr;
          const witness_schedule_object*         _p_witness_schedule_obj    = nullptr;
+         ///@}
+
+         /// Maintenance pseudo random number generator
+         ///@{
+         class maintenance_prng
+         {
+            public:
+               maintenance_prng() : _seed(0), _counter(0) {}
+
+               void seed(uint64_t seed);
+               uint64_t get_seed() const;
+               uint64_t rand();
+
+            private:
+               uint64_t _seed;
+               uint64_t _counter;
+
+         };
+         maintenance_prng _maintenance_prng;
+      public:
+         uint64_t get_maintenance_seed() const;
          ///@}
    };
 

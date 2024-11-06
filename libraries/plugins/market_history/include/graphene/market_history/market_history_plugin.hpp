@@ -25,6 +25,7 @@
 
 #include <graphene/app/plugin.hpp>
 #include <graphene/chain/database.hpp>
+#include <graphene/chain/operation_history_object.hpp>
 
 #include <fc/thread/future.hpp>
 #include <fc/uint128.hpp>
@@ -53,7 +54,7 @@ enum market_history_object_type
    order_history_object_type = 0,
    bucket_object_type = 1,
    market_ticker_object_type = 2,
-   market_ticker_meta_object_type = 3
+   market_ticker_meta_object_type = 3,
 };
 
 struct bucket_key
@@ -79,8 +80,8 @@ struct bucket_key
 
 struct bucket_object : public abstract_object<bucket_object>
 {
-   static const uint8_t space_id = MARKET_HISTORY_SPACE_ID;
-   static const uint8_t type_id  = bucket_object_type;
+   static constexpr uint8_t space_id = MARKET_HISTORY_SPACE_ID;
+   static constexpr uint8_t type_id  = bucket_object_type;
 
    price high()const { return asset( high_base, key.base ) / asset( high_quote, key.quote ); }
    price low()const { return asset( low_base, key.base ) / asset( low_quote, key.quote ); }
@@ -112,8 +113,8 @@ struct history_key {
 };
 struct order_history_object : public abstract_object<order_history_object>
 {
-   static const uint8_t space_id = MARKET_HISTORY_SPACE_ID;
-   static const uint8_t type_id  = order_history_object_type;
+   static constexpr uint8_t space_id = MARKET_HISTORY_SPACE_ID;
+   static constexpr uint8_t type_id  = order_history_object_type;
 
    history_key          key;
    fc::time_point_sec   time;
@@ -137,8 +138,8 @@ struct order_history_object_key_sequence_extractor
 
 struct market_ticker_object : public abstract_object<market_ticker_object>
 {
-   static const uint8_t space_id = MARKET_HISTORY_SPACE_ID;
-   static const uint8_t type_id  = market_ticker_object_type;
+   static constexpr uint8_t space_id = MARKET_HISTORY_SPACE_ID;
+   static constexpr uint8_t type_id  = market_ticker_object_type;
 
    asset_id_type       base;
    asset_id_type       quote;
@@ -152,8 +153,8 @@ struct market_ticker_object : public abstract_object<market_ticker_object>
 
 struct market_ticker_meta_object : public abstract_object<market_ticker_meta_object>
 {
-   static const uint8_t space_id = MARKET_HISTORY_SPACE_ID;
-   static const uint8_t type_id  = market_ticker_meta_object_type;
+   static constexpr uint8_t space_id = MARKET_HISTORY_SPACE_ID;
+   static constexpr uint8_t type_id  = market_ticker_meta_object_type;
 
    object_id_type      rolling_min_order_his_id;
    bool                skip_min_order_his_id = false;
@@ -216,7 +217,6 @@ typedef generic_index<bucket_object, bucket_object_multi_index_type> bucket_inde
 typedef generic_index<order_history_object, order_history_multi_index_type> history_index;
 typedef generic_index<market_ticker_object, market_ticker_object_multi_index_type> market_ticker_index;
 
-
 namespace detail
 {
     class market_history_plugin_impl;
@@ -230,16 +230,16 @@ namespace detail
 class market_history_plugin : public graphene::app::plugin
 {
    public:
-      market_history_plugin();
-      virtual ~market_history_plugin();
+      explicit market_history_plugin(graphene::app::application& app);
+      ~market_history_plugin() override;
 
       std::string plugin_name()const override;
-      virtual void plugin_set_program_options(
+      void plugin_set_program_options(
          boost::program_options::options_description& cli,
          boost::program_options::options_description& cfg) override;
-      virtual void plugin_initialize(
+      void plugin_initialize(
          const boost::program_options::variables_map& options) override;
-      virtual void plugin_startup() override;
+      void plugin_startup() override;
 
       uint32_t                    max_history()const;
       const flat_set<uint32_t>&   tracked_buckets()const;
@@ -247,7 +247,6 @@ class market_history_plugin : public graphene::app::plugin
       uint32_t                    max_order_his_seconds_per_market()const;
 
    private:
-      friend class detail::market_history_plugin_impl;
       std::unique_ptr<detail::market_history_plugin_impl> my;
 };
 

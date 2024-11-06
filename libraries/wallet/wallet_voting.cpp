@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2017 Cryptonomex, Inc., and contributors.
+ * Copyright (c) 2020-2023 Revolution Populi Limited, and contributors.
  *
  * The MIT License
  *
@@ -45,48 +46,24 @@ namespace graphene { namespace wallet { namespace detail {
       )
    {
       account_object acct = get_account( account );
-
-      // you could probably use a faster algorithm for this, but flat_set is fast enough :)
-      flat_set< worker_id_type > merged;
-      merged.reserve( delta.vote_for.size() + delta.vote_against.size() + delta.vote_abstain.size() );
-      for( const worker_id_type& wid : delta.vote_for )
-      {
-         bool inserted = merged.insert( wid ).second;
-         FC_ASSERT( inserted, "worker ${wid} specified multiple times", ("wid", wid) );
-      }
-      for( const worker_id_type& wid : delta.vote_against )
-      {
-         bool inserted = merged.insert( wid ).second;
-         FC_ASSERT( inserted, "worker ${wid} specified multiple times", ("wid", wid) );
-      }
-      for( const worker_id_type& wid : delta.vote_abstain )
-      {
-         bool inserted = merged.insert( wid ).second;
-         FC_ASSERT( inserted, "worker ${wid} specified multiple times", ("wid", wid) );
-      }
-
-      // should be enforced by FC_ASSERT's above
-      assert( merged.size() == delta.vote_for.size() + delta.vote_against.size() + delta.vote_abstain.size() );
-
-      vector< object_id_type > query_ids;
-      for( const worker_id_type& wid : merged )
-         query_ids.push_back( wid );
-
       flat_set<vote_id_type> new_votes( acct.options.votes );
 
-      fc::variants objects = _remote_db->get_objects( query_ids, {} );
-      for( const variant& obj : objects )
+      vector<object_id_type> unvote_query_ids(delta.unvote_for.begin(), delta.unvote_for.end());
+      fc::variants unvote_objects = _remote_db->get_objects( unvote_query_ids, {} );
+      for( const variant& obj : unvote_objects )
       {
          worker_object wo;
          from_variant( obj, wo, GRAPHENE_MAX_NESTED_OBJECTS );
          new_votes.erase( wo.vote_for );
-         new_votes.erase( wo.vote_against );
-         if( delta.vote_for.find( wo.id ) != delta.vote_for.end() )
-            new_votes.insert( wo.vote_for );
-         else if( delta.vote_against.find( wo.id ) != delta.vote_against.end() )
-            new_votes.insert( wo.vote_against );
-         else
-            assert( delta.vote_abstain.find( wo.id ) != delta.vote_abstain.end() );
+      }
+
+      vector<object_id_type> vote_query_ids(delta.vote_for.begin(), delta.vote_for.end());
+      fc::variants vote_objects = _remote_db->get_objects( vote_query_ids, {} );
+      for( const variant& obj : vote_objects )
+      {
+         worker_object wo;
+         from_variant( obj, wo, GRAPHENE_MAX_NESTED_OBJECTS );
+         new_votes.insert( wo.vote_for );
       }
 
       account_update_operation update_op;
@@ -405,6 +382,40 @@ namespace graphene { namespace wallet { namespace detail {
       return sign_transaction( tx, broadcast );
    } FC_CAPTURE_AND_RETHROW( (account_to_modify)(desired_number_of_witnesses)
                              (desired_number_of_committee_members)(broadcast) ) }
+
+   signed_transaction wallet_api_impl::propose_parameter_extension_change( const string& proposing_account,
+         fc::time_point_sec expiration_time, const variant_object& changed_extensions, bool broadcast )
+   {
+      FC_ASSERT( !changed_extensions.contains("current_fees") );
+
+      const chain_parameters& current_params = get_global_properties().parameters;
+      chain_parameters new_params = current_params;
+      const chain_parameters::ext& current_extensions = current_params.extensions.value;
+      chain_parameters::ext new_extensions = current_extensions;
+      fc::reflector<chain_parameters::ext>::visit(
+         fc::from_variant_visitor<chain_parameters::ext>( changed_extensions, new_extensions, GRAPHENE_MAX_NESTED_OBJECTS )
+         );
+
+      committee_member_update_global_parameters_operation update_op;
+      update_op.new_parameters = new_params;
+      update_op.new_parameters.extensions.value = new_extensions;
+
+      proposal_create_operation prop_op;
+
+      prop_op.expiration_time = expiration_time;
+      prop_op.review_period_seconds = current_params.committee_proposal_review_period;
+      prop_op.fee_paying_account = get_account(proposing_account).id;
+
+      prop_op.proposed_ops.emplace_back( update_op );
+      current_params.get_current_fees().set_fee( prop_op.proposed_ops.back().op );
+
+      signed_transaction tx;
+      tx.operations.push_back(prop_op);
+      set_operation_fees(tx, current_params.get_current_fees());
+      tx.validate();
+
+      return sign_transaction(tx, broadcast);
+   }
 
    signed_transaction wallet_api_impl::propose_parameter_change( const string& proposing_account,
          fc::time_point_sec expiration_time, const variant_object& changed_values, bool broadcast )

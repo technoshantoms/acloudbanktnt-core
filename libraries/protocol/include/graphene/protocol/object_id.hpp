@@ -107,8 +107,8 @@ namespace graphene { namespace db {
    template<uint8_t SpaceID, uint8_t TypeID>
    struct object_id
    {
-      static const uint8_t space_id = SpaceID;
-      static const uint8_t type_id = TypeID;
+      static constexpr uint8_t space_id = SpaceID;
+      static constexpr uint8_t type_id = TypeID;
 
       object_id() = default;
       object_id( unsigned_int i ):instance(i){}
@@ -127,7 +127,7 @@ namespace graphene { namespace db {
       explicit operator uint64_t()const { return object_id_type( *this ).number; }
 
       template<typename DB>
-      decltype(auto) operator()(const DB& db)const { return db.get(*this); }
+      auto operator()(const DB& db)const -> const decltype(db.get(*this))& { return db.get(*this); }
 
       friend bool  operator == ( const object_id& a, const object_id& b ) { return a.instance == b.instance; }
       friend bool  operator != ( const object_id& a, const object_id& b ) { return a.instance != b.instance; }
@@ -169,7 +169,7 @@ struct reflector<graphene::db::object_id<SpaceID,TypeID> >
 {
     typedef graphene::db::object_id<SpaceID,TypeID> type;
     typedef std::true_type is_defined;
-    using native_members = typelist::list<fc::field_reflector<0, type, unsigned_int, &type::instance>>;
+    using native_members = typelist::list<fc::field_reflection<0, type, unsigned_int, &type::instance>>;
     using inherited_members = typelist::list<>;
     using members = native_members;
     using base_classes = typelist::list<>;

@@ -1,30 +1,10 @@
 /*
- * Copyright (c) 2015 Cryptonomex, Inc., and contributors.
- *
- * The MIT License
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * acloudbank
  */
 #pragma once
 
-#define GRAPHENE_SYMBOL "BTS"
-#define GRAPHENE_ADDRESS_PREFIX "BTS"
+#define GRAPHENE_SYMBOL "CREDIT"
+#define GRAPHENE_ADDRESS_PREFIX "CREDIT"
 
 #define GRAPHENE_BLOCKCHAIN_PRECISION        uint64_t( 100000 )
 #define GRAPHENE_BLOCKCHAIN_PRECISION_DIGITS 5
@@ -35,7 +15,7 @@
 #define GRAPHENE_MIN_ASSET_SYMBOL_LENGTH 3
 #define GRAPHENE_MAX_ASSET_SYMBOL_LENGTH 16
 
-#define GRAPHENE_MAX_SHARE_SUPPLY int64_t(1000000000000000ll)
+constexpr int64_t GRAPHENE_MAX_SHARE_SUPPLY (1000000000000000LL); // 10 ^ 15
 
 #define GRAPHENE_MAX_WORKER_NAME_LENGTH                       63
 #define GRAPHENE_MAX_URL_LENGTH                               127
@@ -84,17 +64,16 @@
 #define GRAPHENE_DEFAULT_LIFETIME_REFERRER_PERCENT_OF_FEE     (30*GRAPHENE_1_PERCENT)
 #define GRAPHENE_DEFAULT_CASHBACK_VESTING_PERIOD_SEC          (60*60*24*365) ///< 1 year
 #define GRAPHENE_DEFAULT_CASHBACK_VESTING_THRESHOLD           (GRAPHENE_BLOCKCHAIN_PRECISION*int64_t(100))
-#define GRAPHENE_DEFAULT_BURN_PERCENT_OF_FEE                  (20*GRAPHENE_1_PERCENT)
 #define GRAPHENE_DEFAULT_MAX_ASSERT_OPCODE                    1
-#define GRAPHENE_DEFAULT_FEE_LIQUIDATION_THRESHOLD            GRAPHENE_BLOCKCHAIN_PRECISION * 100;
 #define GRAPHENE_DEFAULT_ACCOUNTS_PER_FEE_SCALE               1000
 #define GRAPHENE_DEFAULT_ACCOUNT_FEE_SCALE_BITSHIFTS          4
 #define GRAPHENE_DEFAULT_MAX_BUYBACK_MARKETS                  4
 
 #define GRAPHENE_DEFAULT_WITNESS_PAY_PER_BLOCK            (GRAPHENE_BLOCKCHAIN_PRECISION * int64_t( 10) )
 #define GRAPHENE_DEFAULT_WITNESS_PAY_VESTING_SECONDS      (60*60*24)
-#define GRAPHENE_DEFAULT_WORKER_BUDGET_PER_DAY            (GRAPHENE_BLOCKCHAIN_PRECISION * int64_t(500) * 1000 )
+#define GRAPHENE_DEFAULT_WORKER_BUDGET_PER_DAY               0
 #define GRAPHENE_DEFAULT_MINIMUM_FEEDS                       7
+
 
 /// Tanks and Taps defaults
 /// @{
@@ -129,6 +108,9 @@
 #define GRAPHENE_DEFAULT_MAX_SHORT_SQUEEZE_RATIO        1500 ///< Stop calling when collateral only pays off 150% of the debt
 ///@}
 
+/// How many iterations to run in @c fee_schedule::set_fee()
+constexpr size_t MAX_FEE_STABILIZATION_ITERATION  = 4;
+
 /**
  *  Reserved Account IDs with special meaning
  */
@@ -159,3 +141,8 @@
 #define GRAPHENE_DEFAULT_MAX_CUSTOM_AUTHORITIES_PER_ACCOUNT_OP 3
 /// Maximum number of restrictions a custom authority can contain
 #define GRAPHENE_DEFAULT_MAX_CUSTOM_AUTHORITY_RESTRICTIONS 10
+
+/// Maximum number of witnesses in a top list to max 63 (consensus algorithm)
+#define RSQUARED_WITNESSES_TOP_MAX 63
+// Randomly choose max 21 active witnesses (consensus algorithm)
+#define RSQUARED_WITNESSES_ACTIVE_MAX 21

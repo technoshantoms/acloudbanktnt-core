@@ -1,25 +1,6 @@
 /*
- * Copyright (c) 2017 Cryptonomex, Inc., and contributors.
+ * AcloudBank
  *
- * The MIT License
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
  */
 
 #include <graphene/elasticsearch/elasticsearch_plugin.hpp>
@@ -36,9 +17,12 @@ namespace detail
 class elasticsearch_plugin_impl
 {
    public:
-      elasticsearch_plugin_impl(elasticsearch_plugin& _plugin)
+      explicit elasticsearch_plugin_impl(elasticsearch_plugin& _plugin)
          : _self( _plugin )
-      {  curl = curl_easy_init(); }
+      {
+         curl = curl_easy_init();
+         curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
+      }
       virtual ~elasticsearch_plugin_impl();
 
       bool update_account_histories( const signed_block& b );
@@ -56,7 +40,7 @@ class elasticsearch_plugin_impl
       uint32_t _elasticsearch_bulk_sync = 100;
       bool _elasticsearch_visitor = false;
       std::string _elasticsearch_basic_auth = "";
-      std::string _elasticsearch_index_prefix = "bitshares-";
+      std::string _elasticsearch_index_prefix = "acloudbank-";
       bool _elasticsearch_operation_object = true;
       uint32_t _elasticsearch_start_es_after_block = 0;
       bool _elasticsearch_operation_string = false;
@@ -99,7 +83,6 @@ elasticsearch_plugin_impl::~elasticsearch_plugin_impl()
       curl_easy_cleanup(curl);
       curl = nullptr;
    }
-   return;
 }
 
 bool elasticsearch_plugin_impl::update_account_histories( const signed_block& b )
@@ -157,14 +140,22 @@ bool elasticsearch_plugin_impl::update_account_histories( const signed_block& b 
       flat_set<account_id_type> impacted;
       vector<authority> other;
       // fee_payer is added here
-      operation_get_required_authorities( op.op, impacted, impacted, other,
-                                          MUST_IGNORE_CUSTOM_OP_REQD_AUTHS( db.head_block_time() ) );
+      operation_get_required_authorities( op.op, impacted, impacted, other, false );
 
       if( op.op.is_type< account_create_operation >() )
          impacted.insert( op.result.get<object_id_type>() );
       else
-         operation_get_impacted_accounts( op.op, impacted,
-                                          MUST_IGNORE_CUSTOM_OP_REQD_AUTHS( db.head_block_time() ) );
+         operation_get_impacted_accounts( op.op, impacted, false );
+
+      if( op.result.is_type<extendable_operation_result>() )
+      {
+         const auto& op_result = op.result.get<extendable_operation_result>();
+         if( op_result.value.impacted_accounts.valid() )
+         {
+            for( const auto& a : *op_result.value.impacted_accounts )
+               impacted.insert( a );
+         }
+      }
 
       for( auto& a : other )
          for( auto& item : a.account_auths )
@@ -173,7 +164,11 @@ bool elasticsearch_plugin_impl::update_account_histories( const signed_block& b 
       for( auto& account_id : impacted )
       {
          if(!add_elasticsearch( account_id, oho, b.block_num() ))
+         {
+            elog( "Error adding data to Elastic Search: block num ${b}, account ${a}, data ${d}",
+                  ("b",b.block_num()) ("a",account_id) ("d", oho) );
             return false;
+         }
       }
    }
    // we send bulk at end of block when we are in sync for better real time client experience
@@ -184,7 +179,16 @@ bool elasticsearch_plugin_impl::update_account_histories( const signed_block& b 
       {
          prepare.clear();
          if(!graphene::utilities::SendBulk(std::move(es)))
+         {
+            // Note: although called with `std::move()`, `es` is not updated in `SendBulk()`
+            elog( "Error sending ${n} lines of bulk data to Elastic Search, the first lines are:",
+                  ("n",es.bulk_lines.size()) );
+            for( size_t i = 0; i < es.bulk_lines.size() && i < 10; ++i )
+            {
+               edump( (es.bulk_lines[i]) );
+            }
             return false;
+         }
          else
             bulk_lines.clear();
       }
@@ -278,7 +282,7 @@ void elasticsearch_plugin_impl::doVisitor(const optional <operation_history_obje
 
    auto fill_price = (o_v.fill_receives_amount.value/(double)asset::scaled_precision(fill_receives_asset.precision).value) /
            (o_v.fill_pays_amount.value/(double)asset::scaled_precision(fill_pays_asset.precision).value);
-   vs.fill_data.fill_price_units = fill_price;
+   // vs.fill_data.fill_price_units = fill_price;
    vs.fill_data.fill_price = o_v.fill_fill_price;
    vs.fill_data.is_maker = o_v.fill_is_maker;
 }
@@ -300,7 +304,16 @@ bool elasticsearch_plugin_impl::add_elasticsearch( const account_id_type account
       prepare.clear();
       populateESstruct();
       if(!graphene::utilities::SendBulk(std::move(es)))
+      {
+         // Note: although called with `std::move()`, `es` is not updated in `SendBulk()`
+         elog( "Error sending ${n} lines of bulk data to Elastic Search, the first lines are:",
+               ("n",es.bulk_lines.size()) );
+         for( size_t i = 0; i < es.bulk_lines.size() && i < 10; ++i )
+         {
+            edump( (es.bulk_lines[i]) );
+         }
          return false;
+      }
       else
          bulk_lines.clear();
    }
@@ -358,7 +371,8 @@ void elasticsearch_plugin_impl::prepareBulk(const account_transaction_history_id
    const std::string _id = fc::json::to_string(ath_id);
    fc::mutable_variant_object bulk_header;
    bulk_header["_index"] = index_name;
-   bulk_header["_type"] = "data";
+   // changes_indexer_acloudbank
+   // bulk_header["_type"] = "data";
    bulk_header["_id"] = fc::to_string(ath_id.space_id) + "." + fc::to_string(ath_id.type_id) + "."
                       + fc::to_string(ath_id.instance.value);
    prepare = graphene::utilities::createBulk(bulk_header, std::move(bulk_line));
@@ -408,14 +422,14 @@ void elasticsearch_plugin_impl::populateESstruct()
 
 } // end namespace detail
 
-elasticsearch_plugin::elasticsearch_plugin() :
-   my( new detail::elasticsearch_plugin_impl(*this) )
+elasticsearch_plugin::elasticsearch_plugin(graphene::app::application& app) :
+   plugin(app),
+   my( std::make_unique<detail::elasticsearch_plugin_impl>(*this) )
 {
+   // Nothing else to do
 }
 
-elasticsearch_plugin::~elasticsearch_plugin()
-{
-}
+elasticsearch_plugin::~elasticsearch_plugin() = default;
 
 std::string elasticsearch_plugin::plugin_name()const
 {
@@ -443,7 +457,7 @@ void elasticsearch_plugin::plugin_set_program_options(
          ("elasticsearch-basic-auth", boost::program_options::value<std::string>(),
                "Pass basic auth to elasticsearch database('')")
          ("elasticsearch-index-prefix", boost::program_options::value<std::string>(),
-               "Add a prefix to the index(bitshares-)")
+               "Add a prefix to the index(acloudbank-)")
          ("elasticsearch-operation-object", boost::program_options::value<bool>(),
                "Save operation as object(true)")
          ("elasticsearch-start-es-after-block", boost::program_options::value<uint32_t>(),
@@ -461,34 +475,34 @@ void elasticsearch_plugin::plugin_initialize(const boost::program_options::varia
    my->_oho_index = database().add_index< primary_index< operation_history_index > >();
    database().add_index< primary_index< account_transaction_history_index > >();
 
-   if (options.count("elasticsearch-node-url")) {
+   if (options.count("elasticsearch-node-url") > 0) {
       my->_elasticsearch_node_url = options["elasticsearch-node-url"].as<std::string>();
    }
-   if (options.count("elasticsearch-bulk-replay")) {
+   if (options.count("elasticsearch-bulk-replay") > 0) {
       my->_elasticsearch_bulk_replay = options["elasticsearch-bulk-replay"].as<uint32_t>();
    }
-   if (options.count("elasticsearch-bulk-sync")) {
+   if (options.count("elasticsearch-bulk-sync") > 0) {
       my->_elasticsearch_bulk_sync = options["elasticsearch-bulk-sync"].as<uint32_t>();
    }
-   if (options.count("elasticsearch-visitor")) {
+   if (options.count("elasticsearch-visitor") > 0) {
       my->_elasticsearch_visitor = options["elasticsearch-visitor"].as<bool>();
    }
-   if (options.count("elasticsearch-basic-auth")) {
+   if (options.count("elasticsearch-basic-auth") > 0) {
       my->_elasticsearch_basic_auth = options["elasticsearch-basic-auth"].as<std::string>();
    }
-   if (options.count("elasticsearch-index-prefix")) {
+   if (options.count("elasticsearch-index-prefix") > 0) {
       my->_elasticsearch_index_prefix = options["elasticsearch-index-prefix"].as<std::string>();
    }
-   if (options.count("elasticsearch-operation-object")) {
+   if (options.count("elasticsearch-operation-object") > 0) {
       my->_elasticsearch_operation_object = options["elasticsearch-operation-object"].as<bool>();
    }
-   if (options.count("elasticsearch-start-es-after-block")) {
+   if (options.count("elasticsearch-start-es-after-block") > 0) {
       my->_elasticsearch_start_es_after_block = options["elasticsearch-start-es-after-block"].as<uint32_t>();
    }
-   if (options.count("elasticsearch-operation-string")) {
+   if (options.count("elasticsearch-operation-string") > 0) {
       my->_elasticsearch_operation_string = options["elasticsearch-operation-string"].as<bool>();
    }
-   if (options.count("elasticsearch-mode")) {
+   if (options.count("elasticsearch-mode") > 0) {
       const auto option_number = options["elasticsearch-mode"].as<uint16_t>();
       if(option_number > mode::all)
          FC_THROW_EXCEPTION(graphene::chain::plugin_exception, "Elasticsearch mode not valid");
@@ -588,7 +602,12 @@ vector<operation_history_object> elasticsearch_plugin::get_account_history(
    variant variant_response = fc::json::from_string(response);
    
    const auto hits = variant_response["hits"]["total"];
-   const auto size = std::min(static_cast<uint32_t>(hits.as_uint64()), limit);
+   uint32_t size;
+   if( hits.is_object() ) // ES-7 ?
+      size = static_cast<uint32_t>(hits["value"].as_uint64());
+   else // probably ES-6
+      size = static_cast<uint32_t>(hits.as_uint64());
+   size = std::min( size, limit );
 
    for(unsigned i=0; i<size; i++)
    {
@@ -623,6 +642,7 @@ graphene::utilities::ES elasticsearch_plugin::prepareHistoryQuery(string query)
 {
    CURL *curl;
    curl = curl_easy_init();
+   curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
 
    graphene::utilities::ES es;
    es.curl = curl;

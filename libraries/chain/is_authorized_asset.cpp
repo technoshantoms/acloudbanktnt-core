@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2015 Cryptonomex, Inc., and contributors.
+ * Copyright (c) 2020-2023 Revolution Populi Limited, and contributors.
  *
  * The MIT License
  *
@@ -37,6 +38,11 @@ bool _is_authorized_asset(
    const account_object& acct,
    const asset_object& asset_obj)
 {
+   // committee-account is always allowed to transact after BSIP 86
+   static const object_id_type committee_account_id( GRAPHENE_COMMITTEE_ACCOUNT );
+   if( acct.id == committee_account_id )
+      return true;
+
    if( acct.allowed_assets.valid() )
    {
       if( acct.allowed_assets->find( asset_obj.id ) == acct.allowed_assets->end() )
@@ -44,7 +50,7 @@ bool _is_authorized_asset(
       // must still pass other checks even if it is in allowed_assets
    }
 
-   for( const auto id : acct.blacklisting_accounts )
+   for( const auto& id : acct.blacklisting_accounts )
    {
       if( asset_obj.options.blacklist_authorities.find(id) != asset_obj.options.blacklist_authorities.end() )
          return false;
@@ -53,7 +59,7 @@ bool _is_authorized_asset(
    if( asset_obj.options.whitelist_authorities.size() == 0 )
       return true;
 
-   for( const auto id : acct.whitelisting_accounts )
+   for( const auto& id : acct.whitelisting_accounts )
    {
       if( asset_obj.options.whitelist_authorities.find(id) != asset_obj.options.whitelist_authorities.end() )
          return true;

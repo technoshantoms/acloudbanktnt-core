@@ -1,25 +1,6 @@
 /*
- * Copyright (c) 2017 Cryptonomex, Inc., and contributors.
+ * AcloudBank
  *
- * The MIT License
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
  */
 #pragma once
 
@@ -30,12 +11,17 @@
 #include <graphene/chain/database.hpp>
 
 #include <graphene/chain/balance_object.hpp>
+#include <graphene/chain/ico_balance_object.hpp>
 #include <graphene/chain/chain_property_object.hpp>
 #include <graphene/chain/committee_member_object.hpp>
-#include <graphene/chain/confidential_object.hpp>
 #include <graphene/chain/operation_history_object.hpp>
 #include <graphene/chain/worker_object.hpp>
 #include <graphene/chain/witness_object.hpp>
+#include <graphene/chain/personal_data_object.hpp>
+#include <graphene/chain/content_card_object.hpp>
+#include <graphene/chain/permission_object.hpp>
+#include <graphene/chain/commit_reveal_object.hpp>
+#include <graphene/chain/witness_schedule_object.hpp>
 
 #include <fc/api.hpp>
 #include <fc/variant_object.hpp>
@@ -217,6 +203,11 @@ class database_api
        */
       dynamic_global_property_object get_dynamic_global_properties()const;
 
+      /**
+       * @brief Retrieve the current @ref graphene::chain::witness_schedule_object
+       */
+      witness_schedule_object get_witness_schedule()const;
+
       //////////
       // Keys //
       //////////
@@ -342,6 +333,13 @@ class database_api
       vector<balance_object> get_balance_objects( const vector<address>& addrs )const;
 
       /**
+       * @brief Return all unclaimed ico balance objects for a list of eth addresses
+       * @param addrs a list of eth addresses
+       * @return all unclaimed balance objects for the eth addresses
+       */
+      vector<ico_balance_object> get_ico_balance_objects( const vector<std::string>& addrs )const;
+
+      /**
        * @brief Calculate how much assets in the given balance objects are able to be claimed at current head
        *        block time
        * @param objs a list of balance object IDs
@@ -432,6 +430,25 @@ class database_api
       vector<limit_order_object> get_limit_orders(std::string a, std::string b, uint32_t limit)const;
 
       /**
+       * @brief Fetch open limit orders in all markets relevant to the specified account, ordered by ID
+       *
+       * @param account_name_or_id  The name or ID of an account to retrieve
+       * @param limit  The limitation of items each query can fetch, not greater than a configured value
+       * @param start_id  Start order id, fetch orders whose IDs are greater than or equal to this order
+       *
+       * @return List of limit orders of the specified account
+       *
+       * @note
+       * 1. if @p account_name_or_id cannot be tied to an account, an error will be returned
+       * 2. @p limit can be omitted or be null, if so the default value 101 will be used
+       * 3. @p start_id can be omitted or be null, if so the api will return the "first page" of orders
+       * 4. can only omit one or more arguments in the end of the list, but not one or more in the middle
+       */
+      vector<limit_order_object> get_limit_orders_by_account( const string& account_name_or_id,
+            optional<uint32_t> limit = 101,
+            optional<limit_order_id_type> start_id = optional<limit_order_id_type>() );
+
+      /**
        * @brief Fetch all orders relevant to the specified account and specified market, result orders
        *        are sorted descendingly by price
        *
@@ -446,7 +463,7 @@ class database_api
        * @return List of orders from @p account_name_or_id to the corresponding account
        *
        * @note
-       * 1. if @p account_name_or_id cannot be tied to an account, empty result will be returned
+       * 1. if @p account_name_or_id cannot be tied to an account, an error will be returned
        * 2. @p ostart_id and @p ostart_price can be empty, if so the api will return the "first page" of orders;
        *    if @p ostart_id is specified, its price will be used to do page query preferentially,
        *    otherwise the @p ostart_price will be used;
@@ -497,15 +514,6 @@ class database_api
       vector<force_settlement_object> get_settle_orders_by_account( const std::string& account_name_or_id,
                                                                     force_settlement_id_type start,
                                                                     uint32_t limit )const;
-
-      /**
-       * @brief Get collateral_bid_objects for a given asset
-       * @param a Symbol or ID of asset
-       * @param limit Maximum number of objects to retrieve
-       * @param start skip that many results
-       * @return The settle orders, ordered from earliest settlement date to latest
-       */
-      vector<collateral_bid_object> get_collateral_bids(const std::string& a, uint32_t limit, uint32_t start)const;
 
       /**
        * @brief Get all open margin positions of a given account
@@ -569,36 +577,35 @@ class database_api
       vector<market_ticker> get_top_markets(uint32_t limit)const;
 
       /**
-       * @brief Returns recent trades for the market base:quote, ordered by time, most recent first.
-       * Note: Currently, timezone offsets are not supported. The time must be UTC. The range is [stop, start).
-       *       In case when there are more than 100 trades occurred in the same second, this API only returns
-       *       the first 100 records, can use another API @ref get_trade_history_by_sequence to query for the rest.
+       * @brief Get market transactions occurred in the market base:quote, ordered by time, most recent first.
        * @param base symbol or ID of the base asset
        * @param quote symbol or ID of the quote asset
-       * @param start Start time as a UNIX timestamp, the latest trade to retrieve
-       * @param stop Stop time as a UNIX timestamp, the earliest trade to retrieve
-       * @param limit Number of trasactions to retrieve, capped at 100.
-       * @return Recent transactions in the market
+       * @param start Start time as a UNIX timestamp, the latest transactions to retrieve
+       * @param stop Stop time as a UNIX timestamp, the earliest transactions to retrieve
+       * @param limit Maximum quantity of transactions to retrieve, capped at 100.
+       * @return Transactions in the market
+       * @note The time must be UTC, timezone offsets are not supported. The range is [stop, start].
+       *       In case when there are more than 100 transactions occurred in the same second,
+       *       this API only returns the most recent 100 records, the rest records can be retrieved
+       *       with the @ref get_trade_history_by_sequence API.
        */
       vector<market_trade> get_trade_history( const string& base, const string& quote,
                                               fc::time_point_sec start, fc::time_point_sec stop,
                                               unsigned limit = 100 )const;
 
       /**
-       * @brief Returns trades for the market base:quote, ordered by time, most recent first.
-       * Note: Currently, timezone offsets are not supported. The time must be UTC. The range is [stop, start).
+       * @brief Get market transactions occurred in the market base:quote, ordered by time, most recent first.
        * @param base symbol or ID of the base asset
        * @param quote symbol or ID of the quote asset
-       * @param start Start sequence as an Integer, the latest trade to retrieve
-       * @param stop Stop time as a UNIX timestamp, the earliest trade to retrieve
-       * @param limit Number of trasactions to retrieve, capped at 100
+       * @param start Start sequence as an Integer, the latest transaction to retrieve
+       * @param stop Stop time as a UNIX timestamp, the earliest transactions to retrieve
+       * @param limit Maximum quantity of transactions to retrieve, capped at 100
        * @return Transactions in the market
+       * @note The time must be UTC, timezone offsets are not supported. The range is [stop, start].
        */
       vector<market_trade> get_trade_history_by_sequence( const string& base, const string& quote,
                                                           int64_t start, fc::time_point_sec stop,
                                                           unsigned limit = 100 )const;
-
-
 
       ///////////////
       // Witnesses //
@@ -674,18 +681,19 @@ class database_api
       ///////////////////////
 
       /**
-       * @brief Get all workers
-       * @return All the workers
+       * @brief Get workers
+       * @param is_expired null for all workers, true for expired workers only, false for non-expired workers only
+       * @return A list of worker objects
        *
       */
-      vector<worker_object> get_all_workers()const;
+      vector<worker_object> get_all_workers( const optional<bool> is_expired = optional<bool>() )const;
 
       /**
        * @brief Get the workers owned by a given account
        * @param account_name_or_id The name or ID of the account whose worker should be retrieved
        * @return A list of worker objects owned by the account
        */
-      vector<optional<worker_object>> get_workers_by_account(const std::string account_name_or_id)const;
+      vector<worker_object> get_workers_by_account(const std::string account_name_or_id)const;
 
       /**
        * @brief Get the total number of workers registered with the blockchain
@@ -726,7 +734,7 @@ class database_api
        * @param trx a transaction to get hexdump from
        * @return the hexdump of the transaction without the signatures
        */
-      std::string get_transaction_hex_without_sig( const signed_transaction &trx ) const;
+      std::string get_transaction_hex_without_sig( const transaction &trx ) const;
 
       /**
        *  This API will take a partially signed transaction and a set of public keys that the owner
@@ -803,16 +811,11 @@ class database_api
        */
       vector<proposal_object> get_proposed_transactions( const std::string account_name_or_id )const;
 
-      //////////////////////
-      // Blinded balances //
-      //////////////////////
-
       /**
-       * @brief return the set of blinded balance objects by commitment ID
-       * @param commitments a set of commitments to query for
-       * @return the set of blinded balance objects by commitment ID
+       * @brief return a set of update global parameters operations
+       * @return a set of update global parameters operations
        */
-      vector<blinded_balance_object> get_blinded_balances( const flat_set<commitment_type>& commitments )const;
+      vector<proposal_object> get_proposed_global_parameters()const;
 
       /////////////////
       // Withdrawals //
@@ -841,6 +844,61 @@ class database_api
       vector<withdraw_permission_object> get_withdraw_permissions_by_recipient( const std::string account_name_or_id,
                                                                                 withdraw_permission_id_type start,
                                                                                 uint32_t limit )const;
+
+      ///////////////
+      // R-Squared //
+      ///////////////
+
+      /**
+       * @brief Get personal data
+       * @param owner_account The owner of personal data.
+       * @param permission_account An account who is permitted to use personal data.
+       * @return The personal data object list
+      */
+      vector<personal_data_object> get_personal_data( const account_id_type subject_account,
+                                                      const account_id_type operator_account ) const;
+      /**
+       * @brief Get personal data with maximum id
+       * @param owner_account The owner of personal data.
+       * @param permission_account An account who is permitted to use personal data.
+       * @return The personal data object
+       */
+      fc::optional<personal_data_object> get_last_personal_data( const account_id_type subject_account,
+                                                                 const account_id_type operator_account ) const;
+
+      /**
+       * @brief Get content card by id
+       * @param content_id The id of content card
+       * @return The content card object
+       */
+      fc::optional<content_card_object> get_content_card_by_id( const content_card_id_type content_id ) const;
+
+      /**
+       * @brief Get list of content cards
+       * @param subject_account The owner account of the content
+       * @param content_id Lower bound of content id to start getting results
+       * @param limit Maximum number of content card objects to fetch
+       * @return The content card object list
+       */
+      vector<content_card_object> get_content_cards( const account_id_type subject_account,
+                                                     const content_card_id_type content_id, uint32_t limit ) const;
+
+      /**
+       * @brief Get permission object by id
+       * @param permission_id The id of permission object
+       * @return The permission object
+       */
+      fc::optional<permission_object> get_permission_by_id( const permission_id_type permission_id ) const;
+
+      /**
+       * @brief Get list of permission objects
+       * @param operator_account The owner account of the permissions
+       * @param permission_id Lower bound of permission id to start getting results
+       * @param limit Maximum number of permission objects to fetch
+       * @return The list of permission objects
+       */
+      vector<permission_object> get_permissions( const account_id_type operator_account,
+                                                 const permission_id_type permission_id, uint32_t limit ) const;
 
       //////////
       // HTLC //
@@ -886,7 +944,6 @@ class database_api
       */
       vector<htlc_object> list_htlcs(const htlc_id_type start, uint32_t limit) const;
 
-
 private:
       std::shared_ptr< database_api_impl > my;
 };
@@ -919,6 +976,7 @@ FC_API(graphene::app::database_api,
    (get_config)
    (get_chain_id)
    (get_dynamic_global_properties)
+   (get_witness_schedule)
 
    // Keys
    (get_key_references)
@@ -938,6 +996,7 @@ FC_API(graphene::app::database_api,
    (get_account_balances)
    (get_named_account_balances)
    (get_balance_objects)
+   (get_ico_balance_objects)
    (get_vested_balances)
    (get_vesting_balances)
 
@@ -952,13 +1011,13 @@ FC_API(graphene::app::database_api,
    // Markets / feeds
    (get_order_book)
    (get_limit_orders)
+   (get_limit_orders_by_account)
    (get_account_limit_orders)
    (get_call_orders)
    (get_call_orders_by_account)
    (get_settle_orders)
    (get_settle_orders_by_account)
    (get_margin_positions)
-   (get_collateral_bids)
    (subscribe_to_market)
    (unsubscribe_from_market)
    (get_ticker)
@@ -1000,13 +1059,19 @@ FC_API(graphene::app::database_api,
 
    // Proposed transactions
    (get_proposed_transactions)
-
-   // Blinded balances
-   (get_blinded_balances)
+   (get_proposed_global_parameters)
 
    // Withdrawals
    (get_withdraw_permissions_by_giver)
    (get_withdraw_permissions_by_recipient)
+
+   // PevPop
+   (get_personal_data)
+   (get_last_personal_data)
+   (get_content_card_by_id)
+   (get_content_cards)
+   (get_permission_by_id)
+   (get_permissions)
 
    // HTLC
    (get_htlc)

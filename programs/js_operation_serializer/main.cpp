@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2015 Cryptonomex, Inc., and contributors.
+ * Copyright (c) 2020-2023 Revolution Populi Limited, and contributors.
  *
  * The MIT License
  *
@@ -28,7 +29,6 @@
 #include <graphene/chain/asset_object.hpp>
 #include <graphene/chain/balance_object.hpp>
 #include <graphene/chain/committee_member_object.hpp>
-#include <graphene/chain/confidential_object.hpp>
 #include <graphene/chain/fba_object.hpp>
 #include <graphene/chain/market_object.hpp>
 #include <graphene/chain/htlc_object.hpp>
@@ -165,8 +165,6 @@ struct js_name< fc::static_variant<T...> >
       else return name;
    }
 };
-template<typename... T>
-struct js_name< fc::static_variant<fc::typelist::list<T...>> > : js_name< fc::static_variant<T...> > {};
 template<>
 struct js_name< fc::static_variant<> >
 {
@@ -295,7 +293,7 @@ struct serializer< fc::static_variant<T...>, false >
       {
          init = true;
          fc::static_variant<T...> var;
-         for( int i = 0; i < var.count(); ++i )
+         for( size_t i = 0; i < var.count(); ++i )
          {
             var.set_which(i);
             var.visit( register_type_visitor() );
@@ -309,8 +307,6 @@ struct serializer< fc::static_variant<T...>, false >
       std::cout << "var " <<  js_name<fc::static_variant<T...>>::name() << " = static_variant([" + js_sv_name<T...>::name() + "\n]);\n\n";
    }
 };
-template<typename... T>
-struct serializer< fc::static_variant<fc::typelist::list<T...>>, false > : serializer< fc::static_variant<T...> > {};
 template<>
 struct serializer< fc::static_variant<>, false >
 {
@@ -376,7 +372,7 @@ int main( int argc, char** argv )
     operation op;
 
     std::cout << "ChainTypes.operations=\n";
-    for( int i = 0; i < op.count(); ++i )
+    for( size_t i = 0; i < op.count(); ++i )
     {
        op.set_which(i);
        op.visit( detail_ns::serialize_type_visitor(i) );

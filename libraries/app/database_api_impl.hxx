@@ -1,25 +1,6 @@
 /*
- * Copyright (c) 2017 Cryptonomex, Inc., and contributors.
+ * AcloudBank
  *
- * The MIT License
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
  */
 
 #include <graphene/app/database_api.hpp>
@@ -54,6 +35,7 @@ class database_api_impl : public std::enable_shared_from_this<database_api_impl>
       map<uint32_t, optional<block_header>> get_block_header_batch(const vector<uint32_t> block_nums)const;
       optional<signed_block> get_block(uint32_t block_num)const;
       processed_transaction get_transaction( uint32_t block_num, uint32_t trx_in_block )const;
+      optional<signed_transaction> get_recent_transaction_by_id(const transaction_id_type& id )const;
 
       // Globals
       chain_property_object get_chain_properties()const;
@@ -61,6 +43,7 @@ class database_api_impl : public std::enable_shared_from_this<database_api_impl>
       fc::variant_object get_config()const;
       chain_id_type get_chain_id()const;
       dynamic_global_property_object get_dynamic_global_properties()const;
+      witness_schedule_object get_witness_schedule()const;
 
       // Keys
       vector<flat_set<account_id_type>> get_key_references( vector<public_key_type> key )const;
@@ -85,6 +68,7 @@ class database_api_impl : public std::enable_shared_from_this<database_api_impl>
                                           const flat_set<asset_id_type>& assets )const;
       vector<asset> get_named_account_balances(const std::string& name, const flat_set<asset_id_type>& assets)const;
       vector<balance_object> get_balance_objects( const vector<address>& addrs )const;
+      vector<ico_balance_object> get_ico_balance_objects( const vector<string>& addrs )const;
       vector<asset> get_vested_balances( const vector<balance_id_type>& objs )const;
       vector<vesting_balance_object> get_vesting_balances( const std::string account_id_or_name )const;
 
@@ -101,6 +85,9 @@ class database_api_impl : public std::enable_shared_from_this<database_api_impl>
       // Markets / feeds
       vector<limit_order_object>         get_limit_orders( const std::string& a, const std::string& b,
                                                            uint32_t limit)const;
+      vector<limit_order_object>         get_limit_orders_by_account( const string& account_name_or_id,
+                                                                      optional<uint32_t> limit,
+                                                                      optional<limit_order_id_type> start_id );
       vector<limit_order_object>         get_account_limit_orders( const string& account_name_or_id,
                                                                    const string &base,
                                                                    const string &quote, uint32_t limit,
@@ -114,8 +101,6 @@ class database_api_impl : public std::enable_shared_from_this<database_api_impl>
                                                                       force_settlement_id_type start,
                                                                       uint32_t limit)const;
       vector<call_order_object>          get_margin_positions( const std::string account_id_or_name )const;
-      vector<collateral_bid_object>      get_collateral_bids( const std::string& asset,
-                                                              uint32_t limit, uint32_t start)const;
 
       void subscribe_to_market( std::function<void(const variant&)> callback,
                                 const std::string& a, const std::string& b );
@@ -150,8 +135,8 @@ class database_api_impl : public std::enable_shared_from_this<database_api_impl>
       uint64_t get_committee_count()const;
 
       // Workers
-      vector<worker_object> get_all_workers()const;
-      vector<optional<worker_object>> get_workers_by_account(const std::string account_id_or_name)const;
+      vector<worker_object> get_all_workers( const optional<bool> is_expired = optional<bool>() )const;
+      vector<worker_object> get_workers_by_account(const std::string account_id_or_name)const;
       uint64_t get_worker_count()const;
 
       // Votes
@@ -159,7 +144,7 @@ class database_api_impl : public std::enable_shared_from_this<database_api_impl>
 
       // Authority / validation
       std::string get_transaction_hex(const signed_transaction& trx)const;
-      std::string get_transaction_hex_without_sig(const signed_transaction& trx)const;
+      std::string get_transaction_hex_without_sig(const transaction& trx)const;
 
       set<public_key_type> get_required_signatures( const signed_transaction& trx,
                                                     const flat_set<public_key_type>& available_keys )const;
@@ -174,9 +159,7 @@ class database_api_impl : public std::enable_shared_from_this<database_api_impl>
 
       // Proposed transactions
       vector<proposal_object> get_proposed_transactions( const std::string account_id_or_name )const;
-
-      // Blinded balances
-      vector<blinded_balance_object> get_blinded_balances( const flat_set<commitment_type>& commitments )const;
+      vector<proposal_object> get_proposed_global_parameters()const;
 
       // Withdrawals
       vector<withdraw_permission_object> get_withdraw_permissions_by_giver( const std::string account_id_or_name,
@@ -194,7 +177,17 @@ class database_api_impl : public std::enable_shared_from_this<database_api_impl>
                                           htlc_id_type start, uint32_t limit) const;
       vector<htlc_object> list_htlcs(const htlc_id_type lower_bound_id, uint32_t limit) const;
 
-   //private:
+      // AcloudBank personal data
+      vector<personal_data_object> get_personal_data( const account_id_type subject_account,
+                                                      const account_id_type operator_account ) const;
+      fc::optional<personal_data_object> get_last_personal_data( const account_id_type subject_account,
+                                                                 const account_id_type operator_account ) const;
+      fc::optional<content_card_object> get_content_card_by_id( const content_card_id_type content_id ) const;
+      vector<content_card_object> get_content_cards( const account_id_type subject_account,
+                                                     const content_card_id_type content_id, uint32_t limit ) const;
+      fc::optional<permission_object> get_permission_by_id( const permission_id_type permission_id ) const;
+      vector<permission_object> get_permissions( const account_id_type operator_account,
+                                                 const permission_id_type permission_id, uint32_t limit ) const;
 
       ////////////////////////////////////////////////
       // Accounts
@@ -338,7 +331,7 @@ class database_api_impl : public std::enable_shared_from_this<database_api_impl>
       ////////////////////////////////////////////////
       // Member variables
       ////////////////////////////////////////////////
-
+   private:
       bool _notify_remove_create = false;
       bool _enabled_auto_subscription = true;
 

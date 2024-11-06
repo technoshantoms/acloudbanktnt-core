@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2019 Contributors.
+ * Copyright (c) 2020-2023 Revolution Populi Limited, and contributors.
  *
  * The MIT License
  *
@@ -23,6 +24,7 @@
  */
 
 #include "restriction_predicate.hxx"
+#include "sliced_lists.hxx"
 
 namespace graphene { namespace protocol {
 
@@ -31,7 +33,7 @@ using result_type = object_restriction_predicate<operation>;
 result_type get_restriction_predicate_list_7(size_t idx, vector<restriction> rs) {
    return typelist::runtime::dispatch(operation_list_7::list(), idx, [&rs] (auto t) -> result_type {
       using Op = typename decltype(t)::type;
-      static_assert(typelist::contains<operation::list, Op>(), "");
+      static_assert(typelist::contains<operation::list, Op>(), ""); //TNT support typelist or typename?
       return [p=restrictions_to_predicate<Op>(std::move(rs), true)] (const operation& op) {
          FC_ASSERT(op.which() == operation::tag<Op>::value,
                    "Supplied operation is incorrect type for restriction predicate");

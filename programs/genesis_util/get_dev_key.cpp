@@ -1,31 +1,13 @@
 /*
- * Copyright (c) 2015 Cryptonomex, Inc., and contributors.
+ * AcloudBank
  *
- * The MIT License
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
  */
 
 #include <iostream>
 #include <string>
 
 #include <fc/crypto/elliptic.hpp>
+#include <fc/crypto/base58.hpp>
 #include <fc/io/json.hpp>
 
 #include <graphene/protocol/address.hpp>
@@ -42,6 +24,17 @@ int main( int argc, char** argv )
 {
    try
    {
+      if( argc == 2 ) {
+         fc::limited_mutable_variant_object mvo(5);
+         graphene::protocol::public_key_type pub_key(argv[1]);
+         mvo( "public_key", std::string( pub_key ) )
+            ( "address", graphene::protocol::address( pub_key ) )
+            ;
+         std::cout << fc::json::to_string( fc::mutable_variant_object(mvo) );
+
+         return 0;
+      }
+
       std::string dev_key_prefix;
       bool need_help = false;
       if( argc < 3 ) // requires at least a prefix and a suffix

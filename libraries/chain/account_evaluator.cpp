@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2015 Cryptonomex, Inc., and contributors.
+ * Copyright (c) 2020-2023 Revolution Populi Limited, and contributors.
  *
  * The MIT License
  *
@@ -55,7 +56,7 @@ void verify_authority_accounts( const database& db, const authority& a )
    }
 }
 
-void verify_account_votes( const database& db, const account_options& options )
+void verify_account_votes( const database& db, const account_options& options, optional<account_id_type> account)
 {
    // ensure account's votes satisfy requirements
    // NB only the part of vote checking that requires chain state is here,
@@ -79,40 +80,63 @@ void verify_account_votes( const database& db, const account_options& options )
       has_worker_votes |= (id.type() == vote_id_type::worker);
    }
 
-   if( has_worker_votes && (db.head_block_time() >= HARDFORK_607_TIME) )
-   {
-      const auto& against_worker_idx = db.get_index_type<worker_index>().indices().get<by_vote_against>();
-      for( auto id : options.votes )
-      {
-         if( id.type() == vote_id_type::worker )
-         {
-            FC_ASSERT( against_worker_idx.find( id ) == against_worker_idx.end(),
-                       "Can no longer vote against a worker." );
-         }
+   // Check new options
+   const auto& approve_worker_idx = db.get_index_type<worker_index>().indices().get<by_vote_for>();
+   const auto& committee_idx = db.get_index_type<committee_member_index>().indices().get<by_vote_id>();
+   const auto& witness_idx = db.get_index_type<witness_index>().indices().get<by_vote_id>();
+   for ( auto id : options.votes ) {
+      switch ( id.type() ) {
+         case vote_id_type::committee:
+            FC_ASSERT( committee_idx.find(id) != committee_idx.end(),
+                        "Can not vote for ${id} which does not exist.", ("id",id) );
+            break;
+         case vote_id_type::witness:
+            FC_ASSERT( witness_idx.find(id) != witness_idx.end(),
+                        "Can not vote for ${id} which does not exist.", ("id",id) );
+            break;
+         case vote_id_type::worker:
+            {
+            const auto& itr = approve_worker_idx.find( id );
+            FC_ASSERT( itr != approve_worker_idx.end(),
+                        "Can not vote for ${id} which does not exist.", ("id",id) );
+            // No one can add his vote after the worker start time
+            FC_ASSERT( db.head_block_time() <= itr->work_begin_date,
+                        "Can not vote for ${id}: the worker start time has already passed. The worker start time is ${time}; Blockchain time ${btime}.",
+                        ("id", id)("time", itr->work_begin_date)("btime", db.head_block_time()) );
+            }
+            break;
+         default:
+            FC_THROW( "Invalid Vote Type: ${id}", ("id", id) );
+            break;
       }
    }
-   if ( db.head_block_time() >= HARDFORK_CORE_143_TIME ) {
-      const auto& approve_worker_idx = db.get_index_type<worker_index>().indices().get<by_vote_for>();
-      const auto& committee_idx = db.get_index_type<committee_member_index>().indices().get<by_vote_id>();
-      const auto& witness_idx = db.get_index_type<witness_index>().indices().get<by_vote_id>();
-      for ( auto id : options.votes ) {
-         switch ( id.type() ) {
+
+   // Check old options (if exist)
+   if (!account.valid()) return;
+   const account_options& old_options = (*account)(db).options;
+   for ( auto oid : old_options.votes ) {
+      switch ( oid.type() ) {
             case vote_id_type::committee:
-               FC_ASSERT( committee_idx.find(id) != committee_idx.end(),
-                          "Can not vote for ${id} which does not exist.", ("id",id) );
                break;
             case vote_id_type::witness:
-               FC_ASSERT( witness_idx.find(id) != witness_idx.end(),
-                          "Can not vote for ${id} which does not exist.", ("id",id) );
                break;
             case vote_id_type::worker:
-               FC_ASSERT( approve_worker_idx.find( id ) != approve_worker_idx.end(),
-                          "Can not vote for ${id} which does not exist.", ("id",id) );
-               break;
-            default:
-               FC_THROW( "Invalid Vote Type: ${id}", ("id", id) );
-               break;
-         }
+            {
+            // Are we going to to withdraw a vote for the worker?
+            if (options.votes.find(oid) != options.votes.end()) break;
+
+            const auto& itr = approve_worker_idx.find( oid );
+            FC_ASSERT( itr != approve_worker_idx.end(),
+                        "Can not withdraw a vote for ${id} which does not exist.", ("id",oid) );
+            // No one can add his vote after the worker start time
+            FC_ASSERT( db.head_block_time() <= itr->work_begin_date,
+                        "Can not withdraw a vote for ${id}: the worker start time has already passed. The worker start time is ${time}; Blockchain time ${btime}.",
+                        ("id", oid)("time", itr->work_begin_date)("btime", db.head_block_time()) );
+            }
+            break;
+         default:
+            FC_THROW( "Invalid Vote Type: ${id}", ("id", oid) );
+            break;
       }
    }
 }
@@ -138,7 +162,7 @@ void_result account_create_evaluator::do_evaluate( const account_create_operatio
       evaluate_special_authority( d, *op.extensions.value.active_special_authority );
    if( op.extensions.value.buyback_options.valid() )
       evaluate_buyback_account_options( d, *op.extensions.value.buyback_options );
-   verify_account_votes( d, op.options );
+   verify_account_votes( d, op.options, {} );
 
    auto& acnt_indx = d.get_index_type<account_index>();
    if( op.name.size() )
@@ -156,24 +180,6 @@ object_id_type account_create_evaluator::do_apply( const account_create_operatio
 
    database& d = db();
    uint16_t referrer_percent = o.referrer_percent;
-   bool has_small_percent = (
-         (db().head_block_time() <= HARDFORK_453_TIME)
-      && (o.referrer != o.registrar  )
-      && (o.referrer_percent != 0    )
-      && (o.referrer_percent <= 0x100)
-      );
-
-   if( has_small_percent )
-   {
-      if( referrer_percent >= 100 )
-      {
-         wlog( "between 100% and 0x100%:  ${o}", ("o", o) );
-      }
-      referrer_percent = referrer_percent*100;
-      if( referrer_percent > GRAPHENE_100_PERCENT )
-         referrer_percent = GRAPHENE_100_PERCENT;
-   }
-
    const auto& global_properties = d.get_global_properties();
 
    const auto& new_acnt_object = d.create<account_object>( [&o,&d,&global_properties,referrer_percent]( account_object& obj )
@@ -191,6 +197,7 @@ object_id_type account_create_evaluator::do_apply( const account_create_operatio
          obj.owner            = o.owner;
          obj.active           = o.active;
          obj.options          = o.options;
+         obj.num_committee_voted = o.options.num_committee_voted();
          obj.statistics = d.create<account_statistics_object>([&obj](account_statistics_object& s){
                              s.owner = obj.id;
                              s.name = obj.name;
@@ -269,7 +276,7 @@ void_result account_update_evaluator::do_evaluate( const account_update_operatio
    acnt = &o.account(d);
 
    if( o.new_options.valid() )
-      verify_account_votes( d, *o.new_options );
+      verify_account_votes( d, *o.new_options, o.account );
 
    return void_result();
 } FC_CAPTURE_AND_RETHROW( (o) ) }
@@ -283,15 +290,15 @@ void_result account_update_evaluator::do_apply( const account_update_operation& 
    // update account statistics
    if( o.new_options.valid() )
    {
-      d.modify( acnt->statistics( d ), [&]( account_statistics_object& aso )
+      if ( o.new_options->voting_account != acnt->options.voting_account
+           || o.new_options->votes != acnt->options.votes )
       {
-         if(o.new_options->is_voting() != acnt->options.is_voting())
-            aso.is_voting = !aso.is_voting;
-
-         if((o.new_options->votes != acnt->options.votes ||
-               o.new_options->voting_account != acnt->options.voting_account))
+         d.modify( acnt->statistics( d ), [&d,&o]( account_statistics_object& aso )
+         {
+            aso.is_voting = o.new_options->is_voting();
             aso.last_vote_time = d.head_block_time();
-      } );
+         } );
+      }
    }
 
    // update account object
@@ -306,7 +313,11 @@ void_result account_update_evaluator::do_apply( const account_update_operation& 
          a.active = *o.active;
          a.top_n_control_flags = 0;
       }
-      if( o.new_options ) a.options = *o.new_options;
+      if( o.new_options )
+      {
+         a.options = *o.new_options;
+         a.num_committee_voted = a.options.num_committee_voted();
+      }
       if( o.extensions.value.owner_special_authority.valid() )
       {
          a.owner_special_authority = *(o.extensions.value.owner_special_authority);
@@ -405,19 +416,6 @@ void_result account_upgrade_evaluator::do_apply(const account_upgrade_evaluator:
          a.membership_expiration_date = time_point_sec::maximum();
          a.referrer = a.registrar = a.lifetime_referrer = a.get_id();
          a.lifetime_referrer_fee_percentage = GRAPHENE_100_PERCENT - a.network_fee_percentage;
-      } else if( a.is_annual_member(d.head_block_time()) ) {
-         // Renew an annual subscription that's still in effect.
-         FC_ASSERT( d.head_block_time() <= HARDFORK_613_TIME );
-         FC_ASSERT(a.membership_expiration_date - d.head_block_time() < fc::days(3650),
-                   "May not extend annual membership more than a decade into the future.");
-         a.membership_expiration_date += fc::days(365);
-      } else {
-         // Upgrade from basic account.
-         FC_ASSERT( d.head_block_time() <= HARDFORK_613_TIME );
-         a.statistics(d).process_fees(a, d);
-         assert(a.is_basic_account(d.head_block_time()));
-         a.referrer = a.get_id();
-         a.membership_expiration_date = d.head_block_time() + fc::days(365);
       }
    });
 

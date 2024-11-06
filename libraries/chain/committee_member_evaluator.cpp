@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2015 Cryptonomex, Inc., and contributors.
+ * Copyright (c) 2020-2023 Revolution Populi Limited, and contributors.
  *
  * The MIT License
  *
@@ -76,20 +77,6 @@ void_result committee_member_update_global_parameters_evaluator::do_evaluate(
         const committee_member_update_global_parameters_operation& o)
 { try {
    FC_ASSERT(trx_state->_is_proposed_trx);
-
-   auto now = db().head_block_time();
-   FC_ASSERT( now > HARDFORK_CORE_1468_TIME || !o.new_parameters.extensions.value.updatable_htlc_options.valid(),
-         "Unable to set HTLC parameters until hardfork." );
-   if (!HARDFORK_BSIP_40_PASSED( now )) {
-      FC_ASSERT( !o.new_parameters.extensions.value.custom_authority_options.valid(),
-                 "Unable to set Custom Authority Options until hardfork BSIP 40." );
-      FC_ASSERT( !o.new_parameters.current_fees->exists<custom_authority_create_operation>(),
-                 "Unable to set Custom Authority operation fees until hardfork BSIP 40." );
-      FC_ASSERT( !o.new_parameters.current_fees->exists<custom_authority_update_operation>(),
-                 "Unable to set Custom Authority operation fees until hardfork BSIP 40." );
-      FC_ASSERT( !o.new_parameters.current_fees->exists<custom_authority_delete_operation>(),
-                 "Unable to set Custom Authority operation fees until hardfork BSIP 40." );
-   }
 
    return void_result();
 } FC_CAPTURE_AND_RETHROW( (o) ) }

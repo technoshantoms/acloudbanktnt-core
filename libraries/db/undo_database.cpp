@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2015 Cryptonomex, Inc., and contributors.
+ * Copyright (c) 2020-2023 Revolution Populi Limited, and contributors.
  *
  * The MIT License
  *
@@ -90,18 +91,18 @@ void undo_database::on_remove( const object& obj )
    if( _stack.empty() )
       _stack.emplace_back();
    undo_state& state = _stack.back();
-   if( state.new_ids.count(obj.id) )
+   if( state.new_ids.count(obj.id) > 0 )
    {
       state.new_ids.erase(obj.id);
       return;
    }
-   if( state.old_values.count(obj.id) )
+   if( state.old_values.count(obj.id) > 0 )
    {
       state.removed[obj.id] = std::move(state.old_values[obj.id]);
       state.old_values.erase(obj.id);
       return;
    }
-   if( state.removed.count(obj.id) ) return;
+   if( state.removed.count(obj.id) > 0 ) return;
    state.removed[obj.id] = obj.clone();
 }
 

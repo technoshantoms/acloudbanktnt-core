@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2019 Contributors.
+ * Copyright (c) 2020-2023 Revolution Populi Limited, and contributors.
  *
  * The MIT License
  *
@@ -25,6 +26,7 @@
 #include <graphene/protocol/restriction_predicate.hpp>
 
 #include "restriction_predicate.hxx"
+#include "sliced_lists.hxx"
 
 namespace graphene { namespace protocol {
 
@@ -47,12 +49,19 @@ restriction_predicate_function get_restriction_predicate(vector<restriction> rs,
          return get_restriction_predicate_list_7(typelist::index_of<operation_list_7::list, Op>(), std::move(rs));
       if (typelist::contains<operation_list_8::list, Op>())
          return get_restriction_predicate_list_8(typelist::index_of<operation_list_8::list, Op>(), std::move(rs));
+      if (typelist::contains<operation_list_9::list, Op>())
+         return get_restriction_predicate_list_9(typelist::index_of<operation_list_9::list, Op>(), std::move(rs));
+
+      if (typelist::contains<unsupported_operations_list::list, Op>())
+         FC_THROW_EXCEPTION( fc::assert_exception, "Unsupported operation detected!" );
 
       // Compile time check that we'll never get to the exception below
       static_assert(typelist::contains<typelist::concat<operation_list_1::list, operation_list_2::list,
                                                         operation_list_3::list, operation_list_4::list,
                                                         operation_list_5::list, operation_list_6::list,
-                                                        operation_list_7::list, operation_list_8::list>,
+                                                        operation_list_7::list, operation_list_8::list,
+                                                        operation_list_9::list, 
+                                                        unsupported_operations_list::list>,
                                        Op>(), "");
       FC_THROW_EXCEPTION(fc::assert_exception,
                          "LOGIC ERROR: Operation type not handled by custom authorities implementation. "

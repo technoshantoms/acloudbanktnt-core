@@ -32,7 +32,6 @@ namespace graphene { namespace chain {
    class asset_bitasset_data_object;
    class call_order_object;
    class limit_order_object;
-   class collateral_bid_object;
 
    class limit_order_create_evaluator : public evaluator<limit_order_create_evaluator>
    {
@@ -41,8 +40,6 @@ namespace graphene { namespace chain {
 
          void_result do_evaluate( const limit_order_create_operation& o );
          object_id_type do_apply( const limit_order_create_operation& o );
-
-         asset calculate_market_fee( const asset_object* aobj, const asset& trade_amount );
 
          /** override the default behavior defined by generic_evalautor
           */
@@ -86,20 +83,6 @@ namespace graphene { namespace chain {
          const call_order_object* _order = nullptr;
          const asset_bitasset_data_object* _bitasset_data = nullptr;
          const asset_dynamic_data_object*  _dynamic_data_obj = nullptr;
-   };
-
-   class bid_collateral_evaluator : public evaluator<bid_collateral_evaluator>
-   {
-      public:
-         typedef bid_collateral_operation operation_type;
-
-         void_result do_evaluate( const bid_collateral_operation& o );
-         void_result do_apply( const bid_collateral_operation& o );
-
-         const asset_object* _debt_asset = nullptr;
-         const asset_bitasset_data_object* _bitasset_data = nullptr;
-         const account_object* _paying_account = nullptr;
-         const collateral_bid_object* _bid = nullptr;
    };
 
 } } // graphene::chain

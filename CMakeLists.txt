@@ -1,11 +1,11 @@
-# Defines BitShares library target.
+# Defines AcloudBank library target.
 cmake_minimum_required( VERSION 3.2 FATAL_ERROR )
-project( BitShares LANGUAGES CXX C)
+project( AcloudBank LANGUAGES CXX C)
 
-set( BLOCKCHAIN_NAME "BitShares" )
+set( BLOCKCHAIN_NAME "AcloudBank" )
 
 set( CLI_CLIENT_EXECUTABLE_NAME graphene_client )
-set( GUI_CLIENT_EXECUTABLE_NAME BitShares )
+set( GUI_CLIENT_EXECUTABLE_NAME AcloudBank )
 set( CUSTOM_URL_SCHEME "gcs" )
 set( INSTALLER_APP_ID "68ad7005-8eee-49c9-95ce-9eed97e5b347" )
 
@@ -76,6 +76,28 @@ endmacro()
 
 # Save the old value of CMAKE_REQUIRED_FLAGS
 set( TEMP_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS} )
+
+# Check submodules
+if(NOT MANUAL_SUBMODULES)
+  find_package(Git)
+  if(GIT_FOUND)
+    function (check_submodule relative_path)
+      execute_process(COMMAND git rev-parse "HEAD" WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${relative_path} OUTPUT_VARIABLE localHead)
+      execute_process(COMMAND git rev-parse "HEAD:${relative_path}" WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} OUTPUT_VARIABLE checkedHead)
+      string(COMPARE EQUAL "${localHead}" "${checkedHead}" upToDate)
+      if (upToDate)
+        message(STATUS "Submodule '${relative_path}' is up-to-date")
+      else()
+        message(FATAL_ERROR "Submodule '${relative_path}' is not up-to-date. Please update all submodules with\ngit submodule update --init --recursive --force\nor run cmake with -DMANUAL_SUBMODULES=1\n")
+      endif()
+    endfunction ()
+
+    message(STATUS "Checking submodules")
+    check_submodule(libraries/fc)
+  endif()
+endif()
+# Make sure to always re-run the test.
+unset( MANUAL_SUBMODULES CACHE )
 
 # Fortify source
 if (CMAKE_COMPILER_IS_GNUCXX)
@@ -213,7 +235,7 @@ add_compiler_flag_if_available("-Wunused-but-set-parameter")
 
 if( WIN32 )
 
-    message( STATUS "Configuring BitShares on WIN32")
+    message( STATUS "Configuring AcloudBank on WIN32")
 
     if ( MINGW )
         message( STATUS "Windows build using MinGW" )
@@ -238,15 +260,15 @@ else( WIN32 ) # Apple AND Linux
 
     if( APPLE )
         # Apple Specific Options Here
-        message( STATUS "Configuring BitShares on OS X" )
-        set( CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -stdlib=libc++ -Wall" )
+        message( STATUS "Configuring AcloudBank on OS X" )
+        set( CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -stdlib=libc++ -Wall -fvisibility-inlines-hidden -fvisibility=hidden" )
     else( APPLE )
         if ( "${CMAKE_SYSTEM_NAME}" STREQUAL "OpenBSD" )
             # OpenBSD Specific Options
-            message( STATUS "Configuring BitShares on OpenBSD" )
+            message( STATUS "Configuring AcloudBank on OpenBSD" )
         else()
             # Linux Specific Options Here
-            message( STATUS "Configuring BitShares on Linux" )
+            message( STATUS "Configuring AcloudBank on Linux" )
             set( rt_library rt )
         endif()
         # Common Linux & OpenBSD Options
@@ -286,7 +308,7 @@ if ( NOT MSVC AND FULL_STATIC_BUILD )
     set( CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static -static-libstdc++ -static-libgcc" )
 endif ( NOT MSVC AND FULL_STATIC_BUILD )
 
-set(ENABLE_COVERAGE_TESTING FALSE CACHE BOOL "Build BitShares for code coverage analysis")
+set(ENABLE_COVERAGE_TESTING FALSE CACHE BOOL "Build AcloudBank for code coverage analysis")
 
 if(ENABLE_COVERAGE_TESTING)
     SET(CMAKE_CXX_FLAGS "--coverage ${CMAKE_CXX_FLAGS}")
@@ -316,18 +338,18 @@ set(CPACK_PACKAGE_VERSION_MAJOR "${VERSION_MAJOR}")
 set(CPACK_PACKAGE_VERSION_MINOR "${VERSION_MINOR}")
 set(CPACK_PACKAGE_VERSION_PATCH "${VERSION_PATCH}")
 set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
-set(CPACK_PACKAGE_DESCRIPTION "A client for the BitShares network")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "A client for the BitShares network")
+set(CPACK_PACKAGE_DESCRIPTION "A client for the AcloudBank network")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "A client for the AcloudBank network")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
-set(CPACK_PACKAGE_INSTALL_DIRECTORY "BitShares ${CPACK_PACKAGE_VERSION}")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "AcloudBank ${CPACK_PACKAGE_VERSION}")
 
 if(WIN32)
  SET(CPACK_GENERATOR "ZIP;NSIS")
- set(CPACK_PACKAGE_NAME "BitShares") # override above
+ set(CPACK_PACKAGE_NAME "AcloudBank") # override above
  set(CPACK_NSIS_EXECUTABLES_DIRECTORY .)
- set(CPACK_NSIS_PACKAGE_NAME "BitShares v${CPACK_PACKAGE_VERSION}")
+ set(CPACK_NSIS_PACKAGE_NAME "AcloudBank v${CPACK_PACKAGE_VERSION}")
  set(CPACK_NSIS_DISPLAY_NAME "${CPACK_NSIS_PACKAGE_NAME}")
- set(CPACK_NSIS_DEFINES "  !define MUI_STARTMENUPAGE_DEFAULTFOLDER \\\"BitShares\\\"")
+ set(CPACK_NSIS_DEFINES "  !define MUI_STARTMENUPAGE_DEFAULTFOLDER \\\"AcloudBank\\\"")
  # it seems like windows zip files usually don't have a single directory inside them, unix tgz frequently do
  SET(CPACK_INCLUDE_TOPLEVEL_DIRECTORY 0)
 

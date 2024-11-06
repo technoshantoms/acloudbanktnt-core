@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2015 Cryptonomex, Inc., and contributors.
+ * Copyright (c) 2020-2023 Revolution Populi Limited, and contributors.
  *
  * The MIT License
  *
@@ -63,21 +64,6 @@ namespace graphene { namespace protocol {
    };
 
    template<>
-   class fee_helper<bid_collateral_operation> {
-     public:
-      const bid_collateral_operation::fee_parameters_type& cget(const fee_parameters::flat_set_type& parameters)const
-      {
-         auto itr = parameters.find( bid_collateral_operation::fee_parameters_type() );
-         if ( itr != parameters.end() )
-            return itr->get<bid_collateral_operation::fee_parameters_type>();
-
-         static bid_collateral_operation::fee_parameters_type bid_collateral_dummy;
-         bid_collateral_dummy.fee = fee_helper<call_order_update_operation>().cget(parameters).fee;
-         return bid_collateral_dummy;
-      }
-   };
-
-   template<>
    class fee_helper<asset_update_issuer_operation> {
      public:
       const asset_update_issuer_operation::fee_parameters_type& cget(const fee_parameters::flat_set_type& parameters)const
@@ -104,6 +90,26 @@ namespace graphene { namespace protocol {
          static asset_claim_pool_operation::fee_parameters_type asset_claim_pool_dummy;
          asset_claim_pool_dummy.fee = fee_helper<asset_fund_fee_pool_operation>().cget(parameters).fee;
          return asset_claim_pool_dummy;
+      }
+   };
+
+   template<>
+   class fee_helper<ticket_create_operation> {
+     public:
+      const ticket_create_operation::fee_parameters_type& cget(const fee_parameters::flat_set_type& parameters)const
+      {
+         static ticket_create_operation::fee_parameters_type param;
+         return param;
+      }
+   };
+
+   template<>
+   class fee_helper<ticket_update_operation> {
+     public:
+      const ticket_update_operation::fee_parameters_type& cget(const fee_parameters::flat_set_type& parameters)const
+      {
+         static ticket_update_operation::fee_parameters_type param;
+         return param;
       }
    };
 
@@ -152,9 +158,7 @@ namespace graphene { namespace protocol {
     */
    struct fee_schedule
    {
-      fee_schedule();
-
-      static fee_schedule get_default();
+      static const fee_schedule& get_default();
 
       /**
        *  Finds the appropriate fee parameter struct for the operation
@@ -177,7 +181,7 @@ namespace graphene { namespace protocol {
       /**
        *  Validates all of the parameters are present and accounted for.
        */
-      void validate()const;
+      void validate()const {}
 
       template<typename Operation>
       const typename Operation::fee_parameters_type& get()const
@@ -200,12 +204,12 @@ namespace graphene { namespace protocol {
        *  @note must be sorted by fee_parameters.which() and have no duplicates
        */
       fee_parameters::flat_set_type parameters;
-      uint32_t                 scale = GRAPHENE_100_PERCENT; ///< fee * scale / GRAPHENE_100_PERCENT
-      private:
-      static void set_fee_parameters(fee_schedule& sched);
+      uint32_t                      scale = GRAPHENE_100_PERCENT; ///< fee * scale / GRAPHENE_100_PERCENT
+   private:
+      static fee_schedule get_default_impl();
    };
 
-   typedef fee_schedule fee_schedule_type;
+   using fee_schedule_type = fee_schedule;
 
 } } // graphene::protocol
 

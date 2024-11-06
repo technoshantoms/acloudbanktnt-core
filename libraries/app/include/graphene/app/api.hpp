@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2015 Cryptonomex, Inc., and contributors.
+ * Copyright (c) 2020-2023 Revolution Populi Limited, and contributors.
  *
  * The MIT License
  *
@@ -26,7 +27,6 @@
 #include <graphene/app/database_api.hpp>
 
 #include <graphene/protocol/types.hpp>
-#include <graphene/protocol/confidential.hpp>
 
 #include <graphene/market_history/market_history_plugin.hpp>
 #include <graphene/grouped_orders/grouped_orders_plugin.hpp>
@@ -127,22 +127,22 @@ namespace graphene { namespace app {
 
          /**
           * @brief Get operations relevant to the specificed account
-          * @param account_id_or_name The account ID or name whose history should be queried
+          * @param account_name_or_id The account name or ID whose history should be queried
           * @param stop ID of the earliest operation to retrieve
           * @param limit Maximum number of operations to retrieve (must not exceed 100)
           * @param start ID of the most recent operation to retrieve
           * @return A list of operations performed by account, ordered from most recent to oldest.
           */
          vector<operation_history_object> get_account_history(
-            const std::string account_id_or_name,
+            const std::string account_name_or_id,
             operation_history_id_type stop = operation_history_id_type(),
-            unsigned limit = 100,
+            uint32_t limit = 100,
             operation_history_id_type start = operation_history_id_type()
          )const;
 
          /**
           * @brief Get operations relevant to the specified account filtering by operation type
-          * @param account_id_or_name The account ID or name whose history should be queried
+          * @param account_name_or_id The account name or ID whose history should be queried
           * @param operation_types The IDs of the operation we want to get operations in the account
           * ( 0 = transfer , 1 = limit order create, ...)
           * @param start the sequence number where to start looping back throw the history
@@ -150,15 +150,15 @@ namespace graphene { namespace app {
           * @return history_operation_detail
           */
          history_operation_detail get_account_history_by_operations(
-            const std::string account_id_or_name,
-            vector<uint16_t> operation_types,
+            const std::string account_name_or_id,
+            flat_set<uint16_t> operation_types,
             uint32_t start,
-            unsigned limit
-         );
+            uint32_t limit
+         )const;
 
          /**
           * @brief Get only asked operations relevant to the specified account
-          * @param account_id_or_name The account ID or name whose history should be queried
+          * @param account_name_or_id The account name or ID whose history should be queried
           * @param operation_type The type of the operation we want to get operations in the account
           * ( 0 = transfer , 1 = limit order create, ...)
           * @param stop ID of the earliest operation to retrieve
@@ -167,18 +167,18 @@ namespace graphene { namespace app {
           * @return A list of operations performed by account, ordered from most recent to oldest.
           */
          vector<operation_history_object> get_account_history_operations(
-            const std::string account_id_or_name,
-            int operation_type,
+            const std::string account_name_or_id,
+            int64_t operation_type,
             operation_history_id_type start = operation_history_id_type(),
             operation_history_id_type stop = operation_history_id_type(),
-            unsigned limit = 100
+            uint32_t limit = 100
          )const;
 
          /**
           * @brief Get operations relevant to the specified account referenced
           * by an event numbering specific to the account. The current number of operations
           * for the account can be found in the account statistics (or use 0 for start).
-          * @param account_id_or_name The account ID or name whose history should be queried
+          * @param account_name_or_id The account name or ID whose history should be queried
           * @param stop Sequence number of earliest operation. 0 is default and will
           * query 'limit' number of operations.
           * @param limit Maximum number of operations to retrieve (must not exceed 100)
@@ -186,9 +186,9 @@ namespace graphene { namespace app {
           * 0 is default, which will start querying from the most recent operation.
           * @return A list of operations performed by account, ordered from most recent to oldest.
           */
-         vector<operation_history_object> get_relative_account_history( const std::string account_id_or_name,
+         vector<operation_history_object> get_relative_account_history( const std::string account_name_or_id,
                                                                         uint64_t stop = 0,
-                                                                        unsigned limit = 100,
+                                                                        uint32_t limit = 100,
                                                                         uint64_t start = 0) const;
 
          /**
@@ -220,6 +220,7 @@ namespace graphene { namespace app {
           * it means this API server supports OHLCV data aggregated in 5-minute buckets.
           */
          flat_set<uint32_t> get_market_history_buckets()const;
+
       private:
            application& _app;
            graphene::app::database_api database_api;
@@ -357,97 +358,6 @@ namespace graphene { namespace app {
    };
 
    /**
-    * @brief The crypto_api class allows computations related to blinded transfers.
-    */
-   class crypto_api
-   {
-      public:
-         crypto_api();
-
-         /**
-          * @brief Generates a pedersen commitment: *commit = blind * G + value * G2.
-          * The commitment is 33 bytes, the blinding factor is 32 bytes.
-          * For more information about pederson commitment check url https://en.wikipedia.org/wiki/Commitment_scheme
-          * @param blind Sha-256 blind factor type
-          * @param value Positive 64-bit integer value
-          * @return A 33-byte pedersen commitment: *commit = blind * G + value * G2
-          */
-         fc::ecc::commitment_type blind( const fc::ecc::blind_factor_type& blind, uint64_t value );
-
-         /**
-          * @brief Get sha-256 blind factor type
-          * @param blinds_in List of sha-256 blind factor types
-          * @param non_neg 32-bit integer value
-          * @return A blind factor type
-          */
-         fc::ecc::blind_factor_type blind_sum( const std::vector<blind_factor_type>& blinds_in, uint32_t non_neg );
-
-         /**
-          * @brief Verifies that commits + neg_commits + excess == 0
-          * @param commits_in List of 33-byte pedersen commitments
-          * @param neg_commits_in List of 33-byte pedersen commitments
-          * @param excess Sum of two list of 33-byte pedersen commitments
-          *               where sums the first set and subtracts the second
-          * @return Boolean - true in event of commits + neg_commits + excess == 0, otherwise false
-          */
-         bool verify_sum(
-            const std::vector<commitment_type>& commits_in,
-            const std::vector<commitment_type>& neg_commits_in,
-            int64_t excess
-         );
-
-         /**
-          * @brief Verifies range proof for 33-byte pedersen commitment
-          * @param commit 33-byte pedersen commitment
-          * @param proof List of characters
-          * @return A structure with success, min and max values
-          */
-         verify_range_result verify_range( const fc::ecc::commitment_type& commit, const std::vector<char>& proof );
-
-         /**
-          * @brief Proves with respect to min_value the range for pedersen
-          * commitment which has the provided blinding factor and value
-          * @param min_value Positive 64-bit integer value
-          * @param commit 33-byte pedersen commitment
-          * @param commit_blind Sha-256 blind factor type for the correct digits
-          * @param nonce Sha-256 blind factor type for our non-forged signatures
-          * @param base10_exp Exponents base 10 in range [-1 ; 18] inclusively
-          * @param min_bits 8-bit positive integer, must be in range [0 ; 64] inclusively
-          * @param actual_value 64-bit positive integer, must be greater or equal min_value
-          * @return A list of characters as proof in proof
-          */
-         std::vector<char> range_proof_sign( uint64_t min_value,
-                                             const commitment_type& commit,
-                                             const blind_factor_type& commit_blind,
-                                             const blind_factor_type& nonce,
-                                             int8_t base10_exp,
-                                             uint8_t min_bits,
-                                             uint64_t actual_value );
-
-         /**
-          * @brief Verifies range proof rewind for 33-byte pedersen commitment
-          * @param nonce Sha-256 blind refactor type
-          * @param commit 33-byte pedersen commitment
-          * @param proof List of characters
-          * @return A structure with success, min, max, value_out, blind_out and message_out values
-          */
-         verify_range_proof_rewind_result verify_range_proof_rewind( const blind_factor_type& nonce,
-                                                                     const fc::ecc::commitment_type& commit,
-                                                                     const std::vector<char>& proof );
-
-         /**
-          * @brief Gets "range proof" info. The cli_wallet includes functionality for sending blind transfers
-          * in which the values of the input and outputs amounts are “blinded.”
-          * In the case where a transaction produces two or more outputs, (e.g. an amount to the intended
-          * recipient plus “change” back to the sender),
-          * a "range proof" must be supplied to prove that none of the outputs commit to a negative value.
-          * @param proof List of proof's characters
-          * @return A range proof info structure with exponent, mantissa, min and max values
-          */
-         range_proof_info range_get_info( const std::vector<char>& proof );
-   };
-
-   /**
     * @brief The asset_api class allows query of info about asset holders.
     */
    class asset_api
@@ -503,8 +413,8 @@ namespace graphene { namespace app {
          /**
           * @brief Get grouped limit orders in given market.
           *
-          * @param base_asset ID or symbol of asset being sold
-          * @param quote_asset ID or symbol of asset being purchased
+          * @param base_asset symbol or ID of asset being sold
+          * @param quote_asset symbol or ID of asset being purchased
           * @param group Maximum price diff within each order group, have to be one of configured values
           * @param start Optional price to indicate the first order group to retrieve
           * @param limit Maximum number of order groups to retrieve (must not exceed 101)
@@ -534,12 +444,12 @@ namespace graphene { namespace app {
          /**
           * @brief Get all stored objects of an account in a particular catalog
           *
-          * @param account Account name to get info from
+          * @param account_name_or_id The account name or ID to get info from
           * @param catalog Category classification. Each account can store multiple catalogs.
           *
           * @return The vector of objects of the account or empty
           */
-         vector<account_storage_object> get_storage_info(std::string account, std::string catalog)const;
+         vector<account_storage_object> get_storage_info(std::string account_name_or_id, std::string catalog)const;
 
    private:
          application& _app;
@@ -551,7 +461,6 @@ extern template class fc::api<graphene::app::block_api>;
 extern template class fc::api<graphene::app::network_broadcast_api>;
 extern template class fc::api<graphene::app::network_node_api>;
 extern template class fc::api<graphene::app::history_api>;
-extern template class fc::api<graphene::app::crypto_api>;
 extern template class fc::api<graphene::app::asset_api>;
 extern template class fc::api<graphene::app::orders_api>;
 extern template class fc::api<graphene::debug_witness::debug_api>;
@@ -589,8 +498,6 @@ namespace graphene { namespace app {
          fc::api<history_api> history()const;
          /// @brief Retrieve the network node API
          fc::api<network_node_api> network_node()const;
-         /// @brief Retrieve the cryptography API
-         fc::api<crypto_api> crypto()const;
          /// @brief Retrieve the asset API
          fc::api<asset_api> asset()const;
          /// @brief Retrieve the orders API
@@ -598,7 +505,7 @@ namespace graphene { namespace app {
          /// @brief Retrieve the debug API (if available)
          fc::api<graphene::debug_witness::debug_api> debug()const;
          /// @brief Retrieve the custom operations API
-         fc::api<custom_operations_api> custom()const;
+         fc::api<custom_operations_api> custom_operations()const;
 
          /// @brief Called to enable an API, not reflected.
          void enable_api( const string& api_name );
@@ -610,7 +517,6 @@ namespace graphene { namespace app {
          optional< fc::api<network_broadcast_api> > _network_broadcast_api;
          optional< fc::api<network_node_api> > _network_node_api;
          optional< fc::api<history_api> >  _history_api;
-         optional< fc::api<crypto_api> > _crypto_api;
          optional< fc::api<asset_api> > _asset_api;
          optional< fc::api<orders_api> > _orders_api;
          optional< fc::api<graphene::debug_witness::debug_api> > _debug_api;
@@ -663,15 +569,6 @@ FC_API(graphene::app::network_node_api,
        (get_advanced_node_parameters)
        (set_advanced_node_parameters)
      )
-FC_API(graphene::app::crypto_api,
-       (blind)
-       (blind_sum)
-       (verify_sum)
-       (verify_range)
-       (range_proof_sign)
-       (verify_range_proof_rewind)
-       (range_get_info)
-     )
 FC_API(graphene::app::asset_api,
        (get_asset_holders)
 	   (get_asset_holders_count)
@@ -691,9 +588,8 @@ FC_API(graphene::app::login_api,
        (database)
        (history)
        (network_node)
-       (crypto)
        (asset)
        (orders)
        (debug)
-       (custom)
+       (custom_operations)
      )

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2015-2018 Cryptonomex, Inc., and contributors.
+ * Copyright (c) 2020-2023 Revolution Populi Limited, and contributors.
  *
  * The MIT License
  *
@@ -28,6 +29,10 @@
 
 namespace graphene { namespace chain {
 
+namespace detail {
+
+}
+
 struct proposal_operation_hardfork_visitor
 {
    typedef void result_type;
@@ -42,22 +47,35 @@ struct proposal_operation_hardfork_visitor
             std::enable_if_t<operation::tag<T>::value < operation::tag<tank_create_operation>::value, bool> = true>
    void operator()(const T &) const {}
 
+   void operator()(const graphene::chain::asset_create_operation &v) const {
+      v.common_options.validate_flags( v.bitasset_opts.valid() );
+   }
+
+   void operator()(const graphene::chain::asset_update_operation &v) const {
+      v.new_options.validate_flags( true );
+
+   }
+
+   void operator()(const graphene::chain::asset_update_bitasset_operation &v) const {
+   }
+
+   void operator()(const graphene::chain::asset_claim_fees_operation &v) const {
+   }
+
+   void operator()(const graphene::chain::asset_publish_feed_operation &v) const {
+
+   }
+
    void operator()(const graphene::chain::committee_member_update_global_parameters_operation &op) const {
-      if (block_time < HARDFORK_CORE_1468_TIME) {
-         FC_ASSERT(!op.new_parameters.extensions.value.updatable_htlc_options.valid(), "Unable to set HTLC options before hardfork 1468");
-         FC_ASSERT(!op.new_parameters.current_fees->exists<htlc_create_operation>());
-         FC_ASSERT(!op.new_parameters.current_fees->exists<htlc_redeem_operation>());
-         FC_ASSERT(!op.new_parameters.current_fees->exists<htlc_extend_operation>());
-      }
       if (!HARDFORK_BSIP_40_PASSED(block_time)) {
          FC_ASSERT(!op.new_parameters.extensions.value.custom_authority_options.valid(),
                    "Unable to set Custom Authority Options before hardfork BSIP 40");
-         FC_ASSERT(!op.new_parameters.current_fees->exists<custom_authority_create_operation>(),
+         /*FC_ASSERT(!op.new_parameters.current_fees->exists<custom_authority_create_operation>(),
                    "Unable to define fees for custom authority operations prior to hardfork BSIP 40");
          FC_ASSERT(!op.new_parameters.current_fees->exists<custom_authority_update_operation>(),
                    "Unable to define fees for custom authority operations prior to hardfork BSIP 40");
          FC_ASSERT(!op.new_parameters.current_fees->exists<custom_authority_delete_operation>(),
-                   "Unable to define fees for custom authority operations prior to hardfork BSIP 40");
+                   "Unable to define fees for custom authority operations prior to hardfork BSIP 40");*/
       }
       if (!HARDFORK_BSIP_72_PASSED(block_time)) {
          FC_ASSERT(!op.new_parameters.extensions.value.updatable_tnt_options.valid(),
@@ -71,15 +89,6 @@ struct proposal_operation_hardfork_visitor
          FC_ASSERT(!op.new_parameters.current_fees->exists<account_fund_connection_operation>());
       }
    }
-   void operator()(const graphene::chain::htlc_create_operation &op) const {
-      FC_ASSERT( block_time >= HARDFORK_CORE_1468_TIME, "Not allowed until hardfork 1468" );
-   }
-   void operator()(const graphene::chain::htlc_redeem_operation &op) const {
-      FC_ASSERT( block_time >= HARDFORK_CORE_1468_TIME, "Not allowed until hardfork 1468" );
-   }
-   void operator()(const graphene::chain::htlc_extend_operation &op) const {
-      FC_ASSERT( block_time >= HARDFORK_CORE_1468_TIME, "Not allowed until hardfork 1468" );
-   }
    void operator()(const graphene::chain::custom_authority_create_operation&) const {
       FC_ASSERT( HARDFORK_BSIP_40_PASSED(block_time), "Not allowed until hardfork BSIP 40" );
    }
@@ -89,6 +98,7 @@ struct proposal_operation_hardfork_visitor
    void operator()(const graphene::chain::custom_authority_delete_operation&) const {
       FC_ASSERT( HARDFORK_BSIP_40_PASSED(block_time), "Not allowed until hardfork BSIP 40" );
    }
+
    using TNT_Ops = fc::typelist::list<tank_create_operation, tank_update_operation, tank_delete_operation,
                                       tank_query_operation, tap_open_operation, tap_connect_operation,
                                       account_fund_connection_operation, connection_fund_account_operation>;
@@ -96,6 +106,7 @@ struct proposal_operation_hardfork_visitor
    void operator()(const Op&) const {
       FC_ASSERT(HARDFORK_BSIP_72_PASSED(block_time), "Not allowed before hardfork BSIP 72");
    }
+   
    // loop and self visit in proposals
    void operator()(const graphene::chain::proposal_create_operation &v) const {
       bool already_contains_proposal_update = false;
@@ -106,22 +117,11 @@ struct proposal_operation_hardfork_visitor
          // Do not allow more than 1 proposal_update in a proposal
          if ( op.op.is_type<proposal_update_operation>() )
          {
-            FC_ASSERT( !already_contains_proposal_update, "At most one proposal update can be nested in a proposal!" );
+            FC_ASSERT( !already_contains_proposal_update, 
+                  "At most one proposal update can be nested in a proposal!" );
             already_contains_proposal_update = true;
          }
       }
-   }
-};
-
-struct hardfork_visitor_214 // non-recursive proposal visitor
-{
-   typedef void result_type;
-
-   template<typename T>
-   void operator()(const T &v) const {}
-
-   void operator()(const proposal_update_operation &v) const {
-      FC_ASSERT(false, "Not allowed until hardfork 214");
    }
 };
 
@@ -154,13 +154,6 @@ void_result proposal_create_evaluator::do_evaluate( const proposal_create_operat
    const fc::time_point_sec block_time = d.head_block_time();
    proposal_operation_hardfork_visitor vtor( d, block_time );
    vtor( o );
-   if( block_time < HARDFORK_CORE_214_TIME )
-   {
-      // cannot be removed after hf, unfortunately
-      hardfork_visitor_214 hf214;
-      for( const op_wrapper &op : o.proposed_ops )
-         op.op.visit( hf214 );
-   }
    vtor_1479( o );
 
    const auto& global_parameters = d.get_global_properties().parameters;
@@ -168,19 +161,19 @@ void_result proposal_create_evaluator::do_evaluate( const proposal_create_operat
    FC_ASSERT( o.expiration_time > block_time, "Proposal has already expired on creation." );
    FC_ASSERT( o.expiration_time <= block_time + global_parameters.maximum_proposal_lifetime,
               "Proposal expiration time is too far in the future." );
-   FC_ASSERT( !o.review_period_seconds || fc::seconds( *o.review_period_seconds ) < ( o.expiration_time - block_time ),
-              "Proposal review period must be less than its overall lifetime." );
+   FC_ASSERT( !o.review_period_seconds || 
+         fc::seconds( *o.review_period_seconds ) < ( o.expiration_time - block_time ),
+         "Proposal review period must be less than its overall lifetime." );
 
    // Find all authorities required by the proposed operations
    flat_set<account_id_type> tmp_required_active_auths;
    vector<authority> other;
    for( auto& op : o.proposed_ops )
    {
-      operation_get_required_authorities( op.op, tmp_required_active_auths, _required_owner_auths, other,
-                                          MUST_IGNORE_CUSTOM_OP_REQD_AUTHS( block_time ) );
+      operation_get_required_authorities( op.op, tmp_required_active_auths, _required_owner_auths, other, false );
    }
-   // All accounts which must provide both owner and active authority should be omitted from the active authority set;
-   // owner authority approval implies active authority approval.
+   // All accounts which must provide both owner and active authority should be omitted from the 
+   // active authority set; owner authority approval implies active authority approval.
    std::set_difference( tmp_required_active_auths.begin(), tmp_required_active_auths.end(),
                         _required_owner_auths.begin(), _required_owner_auths.end(),
                         std::inserter( _required_active_auths, _required_active_auths.begin() ) );
@@ -215,9 +208,8 @@ void_result proposal_create_evaluator::do_evaluate( const proposal_create_operat
 object_id_type proposal_create_evaluator::do_apply( const proposal_create_operation& o )
 { try {
    database& d = db();
-   auto chain_time = d.head_block_time();
 
-   const proposal_object& proposal = d.create<proposal_object>( [&o, this, chain_time](proposal_object& proposal) {
+   const proposal_object& proposal = d.create<proposal_object>( [&o, this](proposal_object& proposal) {
       _proposed_trx.expiration = o.expiration_time;
       proposal.proposed_transaction = _proposed_trx;
       proposal.expiration_time = o.expiration_time;
@@ -229,19 +221,8 @@ object_id_type proposal_create_evaluator::do_apply( const proposal_create_operat
       proposal.required_owner_approvals.insert( _required_owner_auths.begin(), _required_owner_auths.end() );
       proposal.required_active_approvals.insert( _required_active_auths.begin(), _required_active_auths.end() );
 
-      if( chain_time > HARDFORK_CORE_1479_TIME )
-         FC_ASSERT( vtor_1479.nested_update_count == 0 || proposal.id.instance() > vtor_1479.max_update_instance,
-                    "Cannot update/delete a proposal with a future id!" );
-      else if( vtor_1479.nested_update_count > 0 && proposal.id.instance() <= vtor_1479.max_update_instance )
-      {
-         // Note: This happened on mainnet, proposal 1.10.17503
-         // prevent approval
-         transfer_operation top;
-         top.from = GRAPHENE_NULL_ACCOUNT;
-         top.to = GRAPHENE_RELAXED_COMMITTEE_ACCOUNT;
-         top.amount = asset( GRAPHENE_MAX_SHARE_SUPPLY );
-         proposal.proposed_transaction.operations.emplace_back( top );
-      }
+      FC_ASSERT( vtor_1479.nested_update_count == 0 || proposal.id.instance() > vtor_1479.max_update_instance,
+                 "Cannot update/delete a proposal with a future id!" );
    });
 
    return proposal.id;
@@ -275,9 +256,9 @@ void_result proposal_update_evaluator::do_apply(const proposal_update_operation&
 { try {
    database& d = db();
 
-   // Potential optimization: if _executed_proposal is true, we can skip the modify step and make push_proposal skip
-   // signature checks. This isn't done now because I just wrote all the proposals code, and I'm not yet 100% sure the
-   // required approvals are sufficient to authorize the transaction.
+   // Potential optimization: if _executed_proposal is true, we can skip the modify step and make push_proposal 
+   // skip signature checks. This isn't done now because I just wrote all the proposals code, and I'm not yet 
+   // 100% sure the required approvals are sufficient to authorize the transaction.
    d.modify(*_proposal, [&o](proposal_object& p) {
       p.available_active_approvals.insert(o.active_approvals_to_add.begin(), o.active_approvals_to_add.end());
       p.available_owner_approvals.insert(o.owner_approvals_to_add.begin(), o.owner_approvals_to_add.end());
